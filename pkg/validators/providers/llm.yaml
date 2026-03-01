@@ -1,0 +1,377 @@
+- name: anthropic
+  category: llm
+  key_prefixes: ["sk-ant-", "anthropic-"]
+  key_patterns: ["^anthropic-", "^sk-ant-"]
+  validation:
+    method: POST
+    url: "https://api.anthropic.com/v1/messages"
+    auth: "header:x-api-key"
+    headers:
+      anthropic-version: "2023-06-01"
+      content-type: "application/json"
+    body: '{"model":"claude-sonnet-4-6","max_tokens":1,"messages":[{"role":"user","content":"Hi"}]}'
+  metadata:
+    - url: "https://console.anthropic.com/api/organizations/{{header.anthropic-organization-id}}/prepaid/credits"
+      method: GET
+      auth: "header:x-api-key"
+      headers:
+        anthropic-version: "2023-06-01"
+      balance_path: "data.0.amount"
+
+- name: deepseek
+  category: llm
+  key_prefixes: ["sk-"]
+  key_patterns: ["^sk-[a-fA-F0-9]{32}$"]
+  validation:
+    method: POST
+    url: "https://api.deepseek.com/chat/completions"
+    auth: "bearer"
+    body: '{"model":"deepseek-chat","messages":[{"role":"user","content":"Hi"}],"max_tokens":1}'
+  metadata:
+    - url: "https://api.deepseek.com/user/balance"
+      method: GET
+      auth: "bearer"
+      balance_path: "balance_infos.0.total_balance"
+
+- name: openrouter
+  category: llm
+  key_prefixes: ["sk-or-"]
+  key_patterns: ["^sk-or-"]
+  validation:
+    method: GET
+    url: "https://openrouter.ai/api/v1/auth/key"
+    auth: "bearer"
+  metadata_from_validation:
+    balance_path: "data.limit"
+    balance_subtract_path: "data.usage"
+
+- name: gemini
+  category: llm
+  key_prefixes: ["AIza"]
+  key_patterns: ["^AIza[a-zA-Z0-9_-]{35}$"]
+  validation:
+    method: GET
+    url: "https://generativelanguage.googleapis.com/v1beta/models?key={{key}}"
+    auth: "none"
+  metadata_from_validation:
+    name_path: "models.0.name"
+
+- name: huggingface
+  category: ai
+  key_prefixes: ["hf_"]
+  key_patterns: ["^hf_"]
+  validation:
+    method: GET
+    url: "https://huggingface.co/api/whoami-v2"
+    auth: "bearer"
+  metadata_from_validation:
+    name_path: "fullname"
+    name_fallback_path: "name"
+    email_path: "email"
+
+- name: xai
+  category: llm
+  key_prefixes: ["xai-"]
+  key_patterns: ["^xai-"]
+  validation:
+    method: POST
+    url: "https://api.x.ai/v1/chat/completions"
+    auth: "bearer"
+    body: '{"model":"grok-4-1-fast-non-reasoning","messages":[{"role":"user","content":"Hi"}],"max_tokens":1}'
+  metadata:
+    - url: "https://api.x.ai/v1/teams"
+      method: GET
+      auth: "bearer"
+      extract: "data.0.id"
+      store_as: "team_id"
+    - url: "https://management-api.x.ai/v1/billing/teams/{{team_id}}/prepaid-credits"
+      method: GET
+      auth: "bearer"
+      balance_path: "total_amount"
+
+- name: venice
+  category: llm
+  key_prefixes: ["venice-"]
+  key_patterns: ["^venice-"]
+  validation:
+    method: GET
+    url: "https://api.venice.ai/api/v1/user"
+    auth: "bearer"
+  metadata_from_validation:
+    name_path: "data.username"
+    email_path: "data.email"
+
+- name: qwen
+  category: llm
+  key_prefixes: []
+  key_patterns: ["^sk-[a-z0-9]+$"]
+  validation:
+    method: POST
+    url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions"
+    auth: "bearer"
+    body: '{"model":"qwen3.5-plus","messages":[{"role":"user","content":"Hi"}],"max_tokens":1}'
+  metadata:
+    - url: "https://dashscope.aliyuncs.com/api/v1/balance"
+      method: GET
+      auth: "bearer"
+      balance_path: "data.available_balance"
+
+- name: kimi
+  category: llm
+  key_prefixes: []
+  key_patterns: ["^sk-[a-zA-Z0-9]+$"]
+  validation:
+    method: POST
+    url: "https://api.moonshot.cn/v1/chat/completions"
+    auth: "bearer"
+    body: '{"model":"kimi-k2.5","messages":[{"role":"user","content":"Hi"}],"max_tokens":1}'
+  metadata:
+    - url: "https://api.moonshot.cn/v1/users/me/balance"
+      method: GET
+      auth: "bearer"
+      balance_path: "data.available_balance"
+
+- name: minimax
+  category: llm
+  key_prefixes: ["minimax-"]
+  key_patterns: ["^minimax-"]
+  validation:
+    method: POST
+    url: "https://api.minimax.io/v1/text/chatcompletion_v2"
+    auth: "bearer"
+    body: '{"model":"MiniMax-M2.5","messages":[{"role":"user","content":"Hi"}],"max_tokens":1}'
+  metadata:
+    - url: "https://api.minimax.chat/v1/account/balance"
+      method: GET
+      auth: "bearer"
+      balance_path: "data.available_balance"
+
+- name: glm
+  category: llm
+  key_prefixes: []
+  key_patterns: ["^[a-f0-9]{32}\\.[a-zA-Z0-9]+$"]
+  validation:
+    method: POST
+    url: "https://open.bigmodel.cn/api/paas/v4/chat/completions"
+    auth: "bearer"
+    body: '{"model":"glm-5","messages":[{"role":"user","content":"Hi"}],"max_tokens":1}'
+  metadata:
+    - url: "https://open.bigmodel.cn/api/paas/v4/user/balance"
+      method: GET
+      auth: "bearer"
+      balance_path: "data.available_balance"
+
+- name: openai
+  category: llm
+  key_prefixes: ["sk-proj-", "sk-svcacct-", "sk-"]
+  key_patterns: ["^sk-[a-zA-Z0-9]{32,}$"]
+  validation:
+    method: POST
+    url: "https://api.openai.com/v1/chat/completions"
+    auth: "bearer"
+    headers:
+      content-type: "application/json"
+    body: '{"model":"gpt-4o-mini","messages":[{"role":"user","content":"Hi"}],"max_tokens":1}'
+  metadata:
+    - url: "https://api.openai.com/v1/dashboard/billing/subscription"
+      method: GET
+      auth: "bearer"
+      balance_path: "plan.title"
+    - url: "https://api.openai.com/v1/organizations"
+      method: GET
+      auth: "bearer"
+      name_path: "data.0.title"
+
+- name: mistral
+  category: llm
+  key_prefixes: []
+  key_patterns: ["^[a-zA-Z0-9]{32}$"]
+  validation:
+    method: GET
+    url: "https://api.mistral.ai/v1/users/me"
+    auth: "bearer"
+  metadata_from_validation:
+    email_path: "email"
+
+- name: cohere
+  category: llm
+  key_prefixes: []
+  key_patterns: ["^[a-zA-Z0-9_-]{40}$"]
+  validation:
+    method: POST
+    url: "https://api.cohere.ai/v1/chat"
+    auth: "bearer"
+    headers:
+      content-type: "application/json"
+    body: '{"message":"Hi","model":"command-r","max_tokens":1}'
+  metadata:
+    - url: "https://api.cohere.com/v1/datasets/usage"
+      method: GET
+      auth: "bearer"
+      extract: "organization_usage"
+      store_as: "usage_bytes"
+
+- name: perplexity
+  category: llm
+  key_prefixes: ["pplx-"]
+  key_patterns: ["^pplx-[a-zA-Z0-9]{43}$"]
+  validation:
+    method: GET
+    url: "https://api.perplexity.ai/user"
+    auth: "bearer"
+
+- name: groq
+  category: llm
+  key_prefixes: ["gsk_"]
+  key_patterns: ["^gsk_[a-zA-Z0-9]{48}$"]
+  validation:
+    method: GET
+    url: "https://api.groq.com/openai/v1/models"
+    auth: "bearer"
+
+- name: together
+  category: llm
+  key_prefixes: []
+  key_patterns: ["^[a-f0-9]{64}$"]
+  validation:
+    method: GET
+    url: "https://api.together.xyz/v1/models"
+    auth: "bearer"
+
+- name: fireworks
+  category: llm
+  key_prefixes: ["fw_"]
+  key_patterns: ["^fw_[a-zA-Z0-9]{32,}$"]
+  validation:
+    method: GET
+    url: "https://api.fireworks.ai/inference/v1/models"
+    auth: "bearer"
+
+- name: novita
+  category: llm
+  key_prefixes: ["novita-"]
+  key_patterns: ["^novita-[a-zA-Z0-9]{32,}$", "^[a-f0-9]{32,}$"]
+  validation:
+    method: POST
+    url: "https://api.novita.ai/v3/chat/completions"
+    auth: "bearer"
+    headers:
+      content-type: "application/json"
+    body: '{"model":"deepseek/deepseek-r1","messages":[{"role":"user","content":"Hi"}],"max_tokens":1}'
+  metadata:
+    - url: "https://api.novita.ai/openapi/v1/billing/balance/detail"
+      method: GET
+      auth: "bearer"
+      balance_path: "data.availableBalance"
+
+- name: replicate
+  category: ai
+  key_prefixes: ["r8_"]
+  key_patterns: ["^r8_[a-zA-Z0-9]{37}$"]
+  validation:
+    method: GET
+    url: "https://api.replicate.com/v1/account"
+    auth: "bearer"
+  metadata_from_validation:
+    name_path: "username"
+    email_path: "github_url"
+
+- name: elevenlabs
+  category: llm
+  key_prefixes: ["sk_"]
+  key_patterns: ["^sk_[a-f0-9]{32}$", "^[a-f0-9]{32}$"]
+  validation:
+    method: GET
+    url: "https://api.elevenlabs.io/v1/user"
+    auth: "header:xi-api-key"
+  metadata_from_validation:
+    name_path: "subscription.tier"
+    balance_path: "subscription.character_count"
+
+- name: midjourney
+  category: llm
+  key_prefixes: ["mj-", "goapi-", "piapi-"]
+  key_patterns: ["^(mj|goapi|piapi)-[a-zA-Z0-9]{32,}$", "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"]
+  validation:
+    method: GET
+    url: "https://api.midjourneyapi.xyz/mj/v2/account"
+    auth: "header:x-api-key"
+  metadata_from_validation:
+    name_path: "username"
+    balance_path: "credits"
+
+- name: kilo
+  category: llm
+  key_prefixes: ["kilo-"]
+  key_patterns: ["^kilo-[a-zA-Z0-9]{30,}$"]
+  validation:
+    method: POST
+    url: "https://api.kilo.ai/api/gateway/v1/chat/completions"
+    auth: "bearer"
+    headers:
+      content-type: "application/json"
+    body: '{"model":"gpt-4.5-preview","messages":[{"role":"user","content":"Hi"}],"max_tokens":1}'
+  metadata:
+    - method: GET
+      url: "https://api.kilo.ai/api/gateway/v1/user/info"
+      auth: "bearer"
+      balance_path: "data.balance"
+      extract: "data.email"
+      store_as: "email"
+
+- name: roocode
+  category: llm
+  key_prefixes: ["roo-", "roocode-", "router-"]
+  key_patterns: ["^roo-[a-zA-Z0-9]{30,}$"]
+  validation:
+    method: POST
+    url: "https://openrouter.ai/api/v1/chat/completions"
+    auth: "bearer"
+    headers:
+      content-type: "application/json"
+    body: '{"model":"anthropic/claude-3.7-sonnet","messages":[{"role":"user","content":"Hi"}],"max_tokens":1}'
+  metadata:
+    - method: GET
+      url: "https://openrouter.ai/api/v1/auth/key"
+      auth: "bearer"
+      balance_path: "data.limit_remaining"
+      extract: "data.label"
+      store_as: "name"
+
+- name: cline
+  category: llm
+  key_prefixes: ["cline-"]
+  key_patterns: ["^cline-[a-zA-Z0-9]{30,}$"]
+  validation:
+    method: POST
+    url: "https://api.cline.bot/v1/chat/completions"
+    auth: "bearer"
+    headers:
+      content-type: "application/json"
+    body: '{"model":"claude-3.7-sonnet","messages":[{"role":"user","content":"Hi"}],"max_tokens":1}'
+  metadata:
+    - method: GET
+      url: "https://api.cline.bot/v1/user"
+      auth: "bearer"
+      balance_path: "credits"
+      extract: "email"
+      store_as: "email"
+
+- name: aider
+  category: llm
+  key_prefixes: ["aider-"]
+  key_patterns: ["^aider-[a-zA-Z0-9]{30,}$"]
+  validation:
+    method: POST
+    url: "https://api.openai.com/v1/chat/completions"
+    auth: "bearer"
+    headers:
+      content-type: "application/json"
+    body: '{"model":"gpt-4.5-preview","messages":[{"role":"user","content":"Hi"}],"max_tokens":1}'
+  metadata:
+    - method: GET
+      url: "https://api.openai.com/dashboard/billing/subscription"
+      auth: "bearer"
+      extract: "account_name"
+      store_as: "name"
+
