@@ -298,13 +298,9 @@ func (v *GenericValidator) fetchChainMetadata(ctx context.Context, apiKey string
 			result.ErrorMessage = fmt.Sprintf("Metadata fetch failed: %v", err)
 			return
 		}
+		defer resp.Body.Close()
 
 		respBytes, err := io.ReadAll(io.LimitReader(resp.Body, 10<<20))
-		if closeErr := resp.Body.Close(); closeErr != nil {
-			result.ErrorMessage = fmt.Sprintf("Metadata error: failed to close response: %v", closeErr)
-			return
-		}
-
 		if err != nil {
 			result.ErrorMessage = fmt.Sprintf("Metadata error: failed to read response: %v", err)
 			return

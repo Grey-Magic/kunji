@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/pterm/pterm"
 	"gopkg.in/yaml.v3"
@@ -57,36 +58,50 @@ type ProviderConfig struct {
 	MetadataFromValidation *MetadataFromValidation `yaml:"metadata_from_validation"`
 }
 
+var (
+	configsCache      []ProviderConfig
+	configsCacheOnce  sync.Once
+	configsCacheError error
+)
+
 func LoadProviderConfigs() ([]ProviderConfig, error) {
-	var allConfigs []ProviderConfig
+	configsCacheOnce.Do(func() {
+		var allConfigs []ProviderConfig
 
-	err := fs.WalkDir(providersFS, "providers", func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() || filepath.Ext(path) != ".yaml" {
+		err := fs.WalkDir(providersFS, "providers", func(path string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if d.IsDir() || filepath.Ext(path) != ".yaml" {
+				return nil
+			}
+
+			data, err := providersFS.ReadFile(path)
+			if err != nil {
+				return fmt.Errorf("reading %s: %w", path, err)
+			}
+
+			var configs []ProviderConfig
+			if err := yaml.Unmarshal(data, &configs); err != nil {
+				return fmt.Errorf("parsing %s: %w", path, err)
+			}
+
+			allConfigs = append(allConfigs, configs...)
 			return nil
-		}
+		})
 
-		data, err := providersFS.ReadFile(path)
 		if err != nil {
-			return fmt.Errorf("reading %s: %w", path, err)
+			configsCacheError = err
+			return
 		}
 
-		var configs []ProviderConfig
-		if err := yaml.Unmarshal(data, &configs); err != nil {
-			return fmt.Errorf("parsing %s: %w", path, err)
-		}
-
-		allConfigs = append(allConfigs, configs...)
-		return nil
+		configsCache = allConfigs
 	})
 
-	if err != nil {
-		return nil, err
+	if configsCacheError != nil {
+		return nil, configsCacheError
 	}
-
-	return allConfigs, nil
+	return configsCache, nil
 }
 
 type PrefixEntry struct {
