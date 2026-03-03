@@ -355,6 +355,366 @@
   metadata_from_validation:
     name_path: "status"
 
+- name: google_geocoding
+  category: api
+  key_prefixes: ["AIza"]
+  key_patterns: ["^AIza[0-9A-Za-z_-]{35}$"]
+  validation:
+    method: GET
+    url: "https://maps.googleapis.com/maps/api/geocode/json?address=1600+Amphitheatre+Parkway&key={{key}}"
+    auth: "none"
+  metadata_from_validation:
+    name_path: "status"
+
+- name: google_elevation
+  category: api
+  key_prefixes: ["AIza"]
+  key_patterns: ["^AIza[0-9A-Za-z_-]{35}$"]
+  validation:
+    method: GET
+    url: "https://maps.googleapis.com/maps/api/elevation/json?locations=39739,-104.990&key={{key}}"
+    auth: "none"
+  metadata_from_validation:
+    name_path: "status"
+
+- name: google_distance_matrix
+  category: api
+  key_prefixes: ["AIza"]
+  key_patterns: ["^AIza[0-9A-Za-z_-]{35}$"]
+  validation:
+    method: GET
+    url: "https://maps.googleapis.com/maps/api/distancematrix/json?origins=40,74&destinations=40.71,-74.00&key={{key}}"
+    auth: "none"
+  metadata_from_validation:
+    name_path: "status"
+
+- name: google_places
+  category: api
+  key_prefixes: ["AIza"]
+  key_patterns: ["^AIza[0-9A-Za-z_-]{35}$"]
+  validation:
+    method: GET
+    url: "https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=40.7,-74.0&radius=500&key={{key}}"
+    auth: "none"
+  metadata_from_validation:
+    name_path: "status"
+
+- name: google_timezone
+  category: api
+  key_prefixes: ["AIza"]
+  key_patterns: ["^AIza[0-9A-Za-z_-]{35}$"]
+  validation:
+    method: GET
+    url: "https://maps.googleapis.com/maps/api/timezone/json?location=39.739,-104.990&timestamp=1331766000&key={{key}}"
+    auth: "none"
+  metadata_from_validation:
+    name_path: "status"
+
+- name: google_directions
+  category: api
+  key_prefixes: ["AIza"]
+  key_patterns: ["^AIza[0-9A-Za-z_-]{35}$"]
+  validation:
+    method: GET
+    url: "https://maps.googleapis.com/maps/api/directions/json?origin=40.7,-74.0&destination=40.71,-74.00&key={{key}}"
+    auth: "none"
+  metadata_from_validation:
+    name_path: "status"
+
+- name: google_translate
+  category: api
+  key_prefixes: ["AIza"]
+  key_patterns: ["^AIza[0-9A-Za-z_-]{35}$"]
+  validation:
+    method: GET
+    url: "https://translation.googleapis.com/language/translate/v2/languages?key={{key}}"
+    auth: "none"
+  metadata_from_validation:
+    name_path: "languages"
+
+- name: google_firebase
+  category: api
+  key_prefixes: ["AIza"]
+  key_patterns: ["^AIza[0-9A-Za-z_-]{35}$"]
+  validation:
+    method: GET
+    url: "https://www.googleapis.com/identitytoolkit/v3/relyingparty/getProjectConfig?key={{key}}"
+    auth: "none"
+  metadata_from_validation:
+    name_path: "projectId"
+
+- name: google_sheets
+  category: api
+  key_prefixes: ["AIza"]
+  key_patterns: ["^AIza[0-9A-Za-z_-]{35}$"]
+  validation:
+    method: GET
+    url: "https://sheets.googleapis.com/v4/spreadsheets?key={{key}}"
+    auth: "none"
+  metadata_from_validation:
+    name_path: "spreadsheetId"
+
+- name: google_custom_search
+  category: api
+  key_prefixes: ["AIza"]
+  key_patterns: ["^AIza[0-9A-Za-z_-]{35}$"]
+  validation:
+    method: GET
+    url: "https://www.googleapis.com/customsearch/v1?key={{key}}&cx=017576662512468230146:omuauf_lfve&q=test"
+    auth: "none"
+  metadata_from_validation:
+    name_path: "searchInformation.formattedTotalResults"
+
+- name: google_pagespeed
+  category: api
+  key_prefixes: ["AIza"]
+  key_patterns: ["^AIza[0-9A-Za-z_-]{35}$"]
+  validation:
+    method: GET
+    url: "https://www.googleapis.com/pagespeedonline/v5/runPagespeed?key={{key}}&url=https://example.com"
+    auth: "none"
+  metadata_from_validation:
+    name_path: "lighthouseResult. categories.performance.score"
+
+- name: google_geolocate
+  category: api
+  key_prefixes: ["AIza"]
+  key_patterns: ["^AIza[0-9A-Za-z_-]{35}$"]
+  validation:
+    method: POST
+    url: "https://www.googleapis.com/geolocation/v1/geolocate?key={{key}}"
+    auth: "none"
+    body: '{}'
+  metadata_from_validation:
+    name_path: "accuracy"
+
+- name: google_books
+  category: api
+  key_prefixes: ["AIza"]
+  key_patterns: ["^AIza[0-9A-Za-z_-]{35}$"]
+  validation:
+    method: GET
+    url: "https://www.googleapis.com/books/v1/volumes?q=harry+potter&maxResults=1&key={{key}}"
+    auth: "none"
+  metadata_from_validation:
+    name_path: "totalItems"
+
+- name: google_safe_browsing
+  category: security
+  key_prefixes: ["AIza"]
+  key_patterns: ["^AIza[0-9A-Za-z_-]{35}$"]
+  validation:
+    method: POST
+    url: "https://safebrowsing.googleapis.com/v4/threatMatches:find?key={{key}}"
+    auth: "none"
+    body: '{"client":{"clientId":"kunji","clientVersion":"1.0.0"},"threatInfo":{"threatTypes":["MALWARE","SOCIAL_ENGINEERING"],"platformTypes":["ANY_PLATFORM"],"threatEntryTypes":["URL"],"threatEntries":[{"url":"http://example.com"}]}}'
+  metadata_from_validation:
+    name_path: "matches"
+
+- name: google_recaptcha_enterprise
+  category: security
+  key_prefixes: ["AIza"]
+  key_patterns: ["^AIza[0-9A-Za-z_-]{35}$"]
+  validation:
+    method: POST
+    url: "https://recaptchaenterprise.googleapis.com/v1/projects/-/assessment?key={{key}}"
+    auth: "none"
+    body: '{"event":{"siteKey":"test"}}'
+
+- name: google_cloud_tasks
+  category: api
+  key_prefixes: ["AIza"]
+  key_patterns: ["^AIza[0-9A-Za-z_-]{35}$"]
+  validation:
+    method: GET
+    url: "https://cloudtasks.googleapis.com/v2/projects/-/locations/-/queues?key={{key}}"
+    auth: "none"
+
+- name: google_cloud_build
+  category: devops
+  key_prefixes: ["AIza"]
+  key_patterns: ["^AIza[0-9A-Za-z_-]{35}$"]
+  validation:
+    method: GET
+    url: "https://cloudbuild.googleapis.com/v1/projects/-/builds?key={{key}}"
+    auth: "none"
+
+- name: google_cloud_storage
+  category: api
+  key_prefixes: ["AIza"]
+  key_patterns: ["^AIza[0-9A-Za-z_-]{35}$"]
+  validation:
+    method: GET
+    url: "https://storage.googleapis.com/storage/v1/b?key={{key}}"
+    auth: "none"
+
+- name: google_cloud_functions
+  category: api
+  key_prefixes: ["AIza"]
+  key_patterns: ["^AIza[0-9A-Za-z_-]{35}$"]
+  validation:
+    method: GET
+    url: "https://cloudfunctions.googleapis.com/v1/projects/-/locations/-/functions?key={{key}}"
+    auth: "none"
+
+- name: google_cloud_run
+  category: api
+  key_prefixes: ["AIza"]
+  key_patterns: ["^AIza[0-9A-Za-z_-]{35}$"]
+  validation:
+    method: GET
+    url: "https://run.googleapis.com/v1/namespaces/-/services?key={{key}}"
+    auth: "none"
+
+- name: google_dialogflow
+  category: api
+  key_prefixes: ["AIza"]
+  key_patterns: ["^AIza[0-9A-Za-z_-]{35}$"]
+  validation:
+    method: GET
+    url: "https://dialogflow.googleapis.com/v3/projects?key={{key}}"
+    auth: "none"
+
+- name: google_cloud_vision
+  category: api
+  key_prefixes: ["AIza"]
+  key_patterns: ["^AIza[0-9A-Za-z_-]{35}$"]
+  validation:
+    method: POST
+    url: "https://vision.googleapis.com/v1/images:annotate?key={{key}}"
+    auth: "none"
+    body: '{"requests":[{"image":{"source":{"imageUri":"https://storage.googleapis.com/cloud-samples-data/vision/ocr/sign.jpg"}},"features":[{"type":"TEXT_DETECTION"}]}}'
+
+- name: google_cloud_speech
+  category: api
+  key_prefixes: ["AIza"]
+  key_patterns: ["^AIza[0-9A-Za-z_-]{35}$"]
+  validation:
+    method: POST
+    url: "https://speech.googleapis.com/v1/operations?key={{key}}"
+    auth: "none"
+    body: '{"config":{"encoding":"LINEAR16","sampleRateHertz":16000,"languageCode":"en-US"},"audio":{"uri":"gs://cloud-samples-data/speech/audio.flac"}}'
+
+- name: google_cloud_natural_language
+  category: api
+  key_prefixes: ["AIza"]
+  key_patterns: ["^AIza[0-9A-Za-z_-]{35}$"]
+  validation:
+    method: POST
+    url: "https://language.googleapis.com/v1/documents:analyzeEntities?key={{key}}"
+    auth: "none"
+    body: '{"document":{"type":"PLAIN_TEXT","content":"Google Cloud"}}'
+
+- name: google_cloud_video_intelligence
+  category: api
+  key_prefixes: ["AIza"]
+  key_patterns: ["^AIza[0-9A-Za-z_-]{35}$"]
+  validation:
+    method: POST
+    url: "https://videointelligence.googleapis.com/v1/videoIntelligenceServiceClient:annotate?key={{key}}"
+    auth: "none"
+    body: '{"inputUri":"gs://cloud-samples-data/video/cat.mp4","features":["LABEL_DETECTION"]}'
+
+- name: google_cloud_ml
+  category: api
+  key_prefixes: ["AIza"]
+  key_patterns: ["^AIza[0-9A-Za-z_-]{35}$"]
+  validation:
+    method: GET
+    url: "https://ml.googleapis.com/v1/projects?key={{key}}"
+    auth: "none"
+
+- name: google_cloud_monitoring
+  category: api
+  key_prefixes: ["AIza"]
+  key_patterns: ["^AIza[0-9A-Za-z_-]{35}$"]
+  validation:
+    method: GET
+    url: "https://monitoring.googleapis.com/v3/projects?key={{key}}"
+    auth: "none"
+
+- name: google_cloud_logging
+  category: api
+  key_prefixes: ["AIza"]
+  key_patterns: ["^AIza[0-9A-Za-z_-]{35}$"]
+  validation:
+    method: GET
+    url: "https://logging.googleapis.com/v2/projects?key={{key}}"
+    auth: "none"
+
+- name: google_cloud_pubsub
+  category: api
+  key_prefixes: ["AIza"]
+  key_patterns: ["^AIza[0-9A-Za-z_-]{35}$"]
+  validation:
+    method: GET
+    url: "https://pubsub.googleapis.com/v1/projects?key={{key}}"
+    auth: "none"
+
+- name: google_cloud_datastore
+  category: api
+  key_prefixes: ["AIza"]
+  key_patterns: ["^AIza[0-9A-Za-z_-]{35}$"]
+  validation:
+    method: POST
+    url: "https://datastore.googleapis.com/v1/projects?key={{key}}"
+    auth: "none"
+    body: '{}'
+
+- name: google_cloud_firestore
+  category: api
+  key_prefixes: ["AIza"]
+  key_patterns: ["^AIza[0-9A-Za-z_-]{35}$"]
+  validation:
+    method: GET
+    url: "https://firestore.googleapis.com/v1/projects?key={{key}}"
+    auth: "none"
+
+- name: google_cloud_container
+  category: devops
+  key_prefixes: ["AIza"]
+  key_patterns: ["^AIza[0-9A-Za-z_-]{35}$"]
+  validation:
+    method: GET
+    url: "https://container.googleapis.com/v1/projects?key={{key}}"
+    auth: "none"
+
+- name: google_cloud_kms
+  category: security
+  key_prefixes: ["AIza"]
+  key_patterns: ["^AIza[0-9A-Za-z_-]{35}$"]
+  validation:
+    method: GET
+    url: "https://cloudkms.googleapis.com/v1/projects?key={{key}}"
+    auth: "none"
+
+- name: google_cloud_iam
+  category: api
+  key_prefixes: ["AIza"]
+  key_patterns: ["^AIza[0-9A-Za-z_-]{35}$"]
+  validation:
+    method: GET
+    url: "https://iam.googleapis.com/v1/projects?key={{key}}"
+    auth: "none"
+
+- name: google_cloud_resource_manager
+  category: api
+  key_prefixes: ["AIza"]
+  key_patterns: ["^AIza[0-9A-Za-z_-]{35}$"]
+  validation:
+    method: GET
+    url: "https://cloudresourcemanager.googleapis.com/v1/projects?key={{key}}"
+    auth: "none"
+
+- name: google_cloud_billing
+  category: api
+  key_prefixes: ["AIza"]
+  key_patterns: ["^AIza[0-9A-Za-z_-]{35}$"]
+  validation:
+    method: GET
+    url: "https://cloudbilling.googleapis.com/v1/projects?key={{key}}"
+    auth: "none"
+
 - name: shodan
   category: security
   key_patterns: ["^[a-zA-Z0-9]{32}$"]
