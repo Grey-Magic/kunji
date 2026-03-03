@@ -28,6 +28,12 @@ Kunji validates API keys concurrently across dozens of services. It auto-detects
 
 ## Installation
 
+**Go Install (Recommended):**
+
+```bash
+go install github.com/Grey-Magic/kunji@latest
+```
+
 **From source:**
 
 ```bash
@@ -37,10 +43,23 @@ go build -o kunji .
 sudo mv kunji /usr/local/bin/
 ```
 
+**Prebuilt binary:**
+
+```bash
+curl -sL https://github.com/Grey-Magic/kunji/releases/latest/download/kunji_1.0.0.zip -o kunji.zip
+unzip kunji.zip
+chmod +x kunji
+sudo mv kunji /usr/local/bin/
+```
+
 **Update:**
 
 ```bash
-sudo kunji update
+# Built-in updater
+kunji update
+
+# Or reinstall
+go install github.com/Grey-Magic/kunji@latest
 ```
 
 ## Usage

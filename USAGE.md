@@ -76,6 +76,43 @@ Kunji auto-detects providers using:
 ./kunji validate -k "sk_live_..."      # Stripe
 ```
 
+### Composite Keys (ID:Secret)
+
+Some providers require two values (client_id and secret). Use colon `:` separator:
+
+```bash
+# Format: client_id:secret
+
+# Twilio (AccountSID:AuthToken)
+./kunji validate -k "ACxxxxxxxx:auth_token"
+
+# Algolia (AppID:AdminKey)
+./kunji validate -k "APP_ID:admin_api_key"
+
+# Freshdesk (Subdomain:APIKey)
+./kunji validate -k "subdomain:api_key"
+
+# Zendesk (Subdomain:Token)
+./kunji validate -k "subdomain:token"
+```
+
+**From file (keys.txt):**
+```
+# One key per line
+ACxxxxxxxx:auth_token
+APP_ID:admin_api_key
+sk-normal-key
+subdomain:api_key
+```
+
+```bash
+./kunji validate -f keys.txt
+```
+
+The code automatically splits by `:` and interpolates:
+- `{{key.client_id}}` → first part
+- `{{key.secret}}` → second part
+
 ### Force Specific Provider
 
 Skip auto-detection and force a provider:
@@ -89,6 +126,31 @@ Skip auto-detection and force a provider:
 
 # Force OpenAI
 ./kunji validate -k "anything" -p openai
+```
+
+**Important:** Some keys work for multiple services (e.g., Google API keys). Use `-p` to test specific service:
+
+```bash
+# Google Services (all use AIza... key format)
+./kunji validate -k "AIza..." -p google_maps          # Maps
+./kunji validate -k "AIza..." -p google_geocoding    # Geocoding
+./kunji validate -k "AIza..." -p google_elevation    # Elevation
+./kunji validate -k "AIza..." -p google_distance_matrix  # Distance Matrix
+./kunji validate -k "AIza..." -p google_places       # Places
+./kunji validate -k "AIza..." -p google_timezone      # Timezone
+./kunji validate -k "AIza..." -p google_directions   # Directions
+./kunji validate -k "AIza..." -p google_translate     # Translate
+./kunji validate -k "AIza..." -p google_firebase      # Firebase
+./kunji validate -k "AIza..." -p google_sheets        # Sheets
+./kunji validate -k "AIza..." -p google_custom_search # Custom Search
+./kunji validate -k "AIza..." -p google_pagespeed     # PageSpeed
+./kunji validate -k "AIza..." -p google_geolocate      # Geolocation
+
+# Test YouTube API key
+./kunji validate -k "AIza..." -p youtube
+
+# Test Gemini/AI API key
+./kunji validate -k "AIza..." -p gemini
 ```
 
 ### Filter by Category
