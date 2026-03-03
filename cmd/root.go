@@ -21,13 +21,27 @@ by utilizing concurrent worker pools, proxy rotation, and smart auto-detection.`
 }
 
 func PrintBanner() {
-	pterm.Println(pterm.LightMagenta("  ██   ██ ██    ██ ███    ██      ██ ██"))
-	pterm.Println(pterm.Magenta("  ██  ██  ██    ██ ████   ██      ██ ██"))
-	pterm.Println(pterm.Cyan("  █████   ██    ██ ██ ██  ██      ██ ██"))
-	pterm.Println(pterm.LightCyan("  ██  ██  ██    ██ ██  ██ ██      ██ ██"))
-	pterm.Println(pterm.Blue("  ██   ██ ██████  ██   ████  █████  ██"))
+	lines := []string{
+		"  ██   ██ ██    ██ ███    ██      ██ ██",
+		"  ██  ██  ██    ██ ████   ██      ██ ██",
+		"  █████   ██    ██ ██ ██  ██      ██ ██",
+		"  ██  ██  ██    ██ ██  ██ ██      ██ ██",
+		"  ██   ██ ██████  ██   ████  █████  ██",
+	}
 
-	pterm.DefaultCenter.Println(pterm.LightCyan("Universal API Key Validation Engine"))
+	colors := []pterm.RGB{
+		{R: 95, G: 0, B: 135},
+		{R: 135, G: 45, B: 175},
+		{R: 155, G: 70, B: 195},
+		{R: 175, G: 95, B: 215},
+		{R: 195, G: 120, B: 235},
+	}
+
+	for i, line := range lines {
+		pterm.RGB{R: colors[i].R, G: colors[i].G, B: colors[i].B}.Println(line)
+	}
+
+	pterm.DefaultCenter.Println(pterm.LightMagenta("Universal API Key Validation Engine"))
 	pterm.Println()
 }
 
