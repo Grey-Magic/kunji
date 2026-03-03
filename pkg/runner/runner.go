@@ -3,9 +3,11 @@ package runner
 import (
 	"bufio"
 	"context"
+	"crypto/rand"
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
+	"math/big"
 	"os"
 	"os/signal"
 	"strings"
@@ -149,6 +151,8 @@ func (r *Runner) Run(keys []string) {
 		closeJobs()
 	}()
 
+	startTime := time.Now()
+
 	go func() {
 		wg.Wait()
 		close(results)
@@ -156,7 +160,9 @@ func (r *Runner) Run(keys []string) {
 
 	validCount := 0
 
-	p, err := pterm.DefaultProgressbar.WithTotal(len(keys)).WithTitle("Validating API Keys").Start()
+	var p *pterm.ProgressbarPrinter
+	pp := pterm.DefaultProgressbar.WithTotal(len(keys)).WithTitle("Validating API Keys")
+	p, err := pp.Start()
 	if err != nil {
 		pterm.Warning.Println("Failed to start progress bar, continuing without it...")
 	}
@@ -191,7 +197,7 @@ func (r *Runner) Run(keys []string) {
 		}
 
 		updateCounter++
-		if p != nil && updateCounter%10 == 0 {
+		if p != nil {
 			p.Increment()
 		}
 
@@ -223,11 +229,32 @@ func (r *Runner) Run(keys []string) {
 		r.displayResultsTable(allResults)
 	}
 
-	pterm.Printf("\n%s\n", pterm.Cyan(fmt.Sprintf("Total Keys: %d  |  Valid: %s  |  Invalid: %s",
-		len(keys),
-		pterm.Green(validCount),
-		pterm.Red(len(keys)-validCount),
-	)))
+	duration := time.Since(startTime)
+	keysPerSec := float64(len(keys)) / duration.Seconds()
+
+	validPercent := 0
+	if len(keys) > 0 {
+		validPercent = (validCount * 100) / len(keys)
+	}
+
+	validColor := pterm.Green
+	if validPercent < 50 {
+		validColor = pterm.Yellow
+	}
+
+	pterm.Println()
+	pterm.Println(pterm.Cyan("┌────────────────────────────────────────┐"))
+	pterm.Printf(pterm.Cyan("│")+" %-11s %s "+pterm.Cyan("│\n"),
+		pterm.LightCyan("Total:"), pterm.Bold.Sprint(len(keys)))
+	pterm.Printf(pterm.Cyan("│")+" %-11s %s "+pterm.Cyan("│\n"),
+		pterm.LightCyan("Valid:"), validColor(pterm.Bold.Sprint(validCount)))
+	pterm.Printf(pterm.Cyan("│")+" %-11s %s "+pterm.Cyan("│\n"),
+		pterm.LightCyan("Invalid:"), pterm.Red(pterm.Bold.Sprint(len(keys)-validCount)))
+	pterm.Printf(pterm.Cyan("│")+" %-11s %s "+pterm.Cyan("│\n"),
+		pterm.LightCyan("Speed:"), pterm.Bold.Sprintf("%.2f/s", keysPerSec))
+	pterm.Printf(pterm.Cyan("│")+" %-11s %s "+pterm.Cyan("│\n"),
+		pterm.LightCyan("Time:"), pterm.Bold.Sprint(duration.Round(time.Millisecond)))
+	pterm.Println(pterm.Cyan("└────────────────────────────────────────┘"))
 }
 
 func (r *Runner) worker(jobs <-chan string, results chan<- *models.ValidationResult, wg *sync.WaitGroup) {
@@ -285,6 +312,7 @@ func (r *Runner) worker(jobs <-chan string, results chan<- *models.ValidationRes
 				if backoff > 10*time.Second {
 					backoff = 10 * time.Second
 				}
+				backoff = r.addJitter(backoff)
 				time.Sleep(backoff)
 				continue
 			}
@@ -293,12 +321,15 @@ func (r *Runner) worker(jobs <-chan string, results chan<- *models.ValidationRes
 				backoffSecs := 2
 				if res.RetryAfter > 0 {
 					backoffSecs = res.RetryAfter
-
-					if backoffSecs > 15 {
-						backoffSecs = 15
+					if backoffSecs > 30 {
+						backoffSecs = 30
 					}
 				}
-				time.Sleep(time.Duration(backoffSecs) * time.Second)
+				backoff := time.Duration(backoffSecs) * time.Second
+				backoff = r.addJitter(backoff)
+
+				pterm.Warning.Printfln("Rate limited by %s, backing off for %s...", providerName, backoff.Round(time.Second))
+				time.Sleep(backoff)
 				attempt++
 				continue
 			}
@@ -678,4 +709,13 @@ func (r *Runner) loadExistingKeys() map[string]bool {
 	}
 
 	return existing
+}
+
+func (r *Runner) addJitter(d time.Duration) time.Duration {
+	maxJitterMs := d.Milliseconds() / 4
+	if maxJitterMs < 100 {
+		maxJitterMs = 100
+	}
+	jitter, _ := rand.Int(rand.Reader, big.NewInt(maxJitterMs))
+	return d + time.Duration(jitter.Int64())*time.Millisecond
 }
