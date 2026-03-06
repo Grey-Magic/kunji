@@ -39,7 +39,7 @@
   key_patterns: ["^sk-or-"]
   validation:
     method: GET
-    url: "https://openrouter.ai/api/v1/auth/key"
+    url: "https://openrouter.ai/api/v1/key"
     auth: "bearer"
   metadata_from_validation:
     balance_path: "data.limit"
@@ -180,7 +180,8 @@
     - url: "https://api.openai.com/v1/organizations"
       method: GET
       auth: "bearer"
-      name_path: "data.0.title"
+      extract: "data.0.title"
+      store_as: "name"
 
 - name: mistral
   category: llm
@@ -199,35 +200,30 @@
   key_patterns: ["^[a-zA-Z0-9_-]{40}$"]
   validation:
     method: POST
-    url: "https://api.cohere.ai/v1/chat"
+    url: "https://api.cohere.com/v1/check-api-key"
     auth: "bearer"
-    headers:
-      content-type: "application/json"
-    body: '{"message":"Hi","model":"command-r","max_tokens":1}'
-  metadata:
-    - url: "https://api.cohere.com/v1/datasets/usage"
-      method: GET
-      auth: "bearer"
-      extract: "organization_usage"
-      store_as: "usage_bytes"
+  metadata_from_validation:
+    name_path: "organization_id"
 
 - name: perplexity
   category: llm
   key_prefixes: ["pplx-"]
   key_patterns: ["^pplx-[a-zA-Z0-9]{43}$"]
   validation:
-    method: GET
-    url: "https://api.perplexity.ai/user"
+    method: POST
+    url: "https://api.perplexity.ai/chat/completions"
     auth: "bearer"
+    body: '{"model":"sonar","messages":[{"role":"user","content":"Hi"}],"max_tokens":1}'
 
 - name: groq
   category: llm
   key_prefixes: ["gsk_"]
   key_patterns: ["^gsk_[a-zA-Z0-9]{48}$"]
   validation:
-    method: GET
-    url: "https://api.groq.com/openai/v1/models"
+    method: POST
+    url: "https://api.groq.com/openai/v1/chat/completions"
     auth: "bearer"
+    body: '{"model":"llama-3.1-70b-versatile","messages":[{"role":"user","content":"Hi"}],"max_tokens":1}'
 
 - name: together
   category: llm
@@ -235,7 +231,7 @@
   key_patterns: ["^[a-f0-9]{64}$"]
   validation:
     method: GET
-    url: "https://api.together.xyz/v1/models"
+    url: "https://api.together.ai/v1/models"
     auth: "bearer"
 
 - name: fireworks
@@ -244,7 +240,7 @@
   key_patterns: ["^fw_[a-zA-Z0-9]{32,}$"]
   validation:
     method: GET
-    url: "https://api.fireworks.ai/inference/v1/models"
+    url: "https://api.fireworks.ai/v1/models"
     auth: "bearer"
 
 - name: novita
