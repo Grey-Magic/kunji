@@ -5,7 +5,7 @@
 **A fast, concurrent CLI tool for validating API keys.**
 
 ![Go](https://img.shields.io/badge/Go-1.21%2B-00ADD8?style=flat-square&logo=go)
-![Version](https://img.shields.io/badge/Version-1.0.0-blue?style=flat-square)
+![Version](https://img.shields.io/badge/Version-1.0.2-blue?style=flat-square)
 ![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey?style=flat-square)
 
 </div>
@@ -46,7 +46,7 @@ sudo mv kunji /usr/local/bin/
 **Prebuilt binary:**
 
 ```bash
-curl -sL https://github.com/Grey-Magic/kunji/releases/latest/download/kunji_1.0.0.zip -o kunji.zip
+curl -sL https://github.com/Grey-Magic/kunji/releases/latest/download/kunji_1.0.2.zip -o kunji.zip
 unzip kunji.zip
 chmod +x kunji
 sudo mv kunji /usr/local/bin/
