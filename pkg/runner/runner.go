@@ -191,27 +191,49 @@ func (r *Runner) Run(keys []string) {
 	}
 
 	updateCounter := 0
-	for res := range results {
-		if res.IsValid {
-			validCount++
-		}
+	var progressTicker *time.Ticker
+	if p != nil {
+		progressTicker = time.NewTicker(100 * time.Millisecond)
+		defer progressTicker.Stop()
+	}
 
-		updateCounter++
-		if p != nil {
-			p.Increment()
-		}
+	for {
+		select {
+		case <-progressTicker.C:
+			if p != nil && updateCounter > 0 {
+				current := p.Current
+				if current < len(keys) {
+					p.Increment()
+				}
+				updateCounter = 0
+			}
+		case res, ok := <-results:
+			if !ok {
+				if p != nil && updateCounter > 0 {
+					p.Add(updateCounter)
+				}
+				goto done
+			}
+			if res.IsValid {
+				validCount++
+			}
 
-		if r.OutFile != "" {
-			if collectAllResults {
+			updateCounter++
+
+			if r.OutFile != "" {
+				if collectAllResults {
+					allResults = append(allResults, *res)
+				}
+				if !strings.HasSuffix(strings.ToLower(r.OutFile), ".json") {
+					r.writeResult(resultFile, csvWriter, res)
+				}
+			} else {
 				allResults = append(allResults, *res)
 			}
-			if !strings.HasSuffix(strings.ToLower(r.OutFile), ".json") {
-				r.writeResult(resultFile, csvWriter, res)
-			}
-		} else {
-			allResults = append(allResults, *res)
 		}
 	}
+
+done:
 
 	if p != nil {
 		p.Stop()
@@ -510,6 +532,29 @@ func (r *Runner) displayValidKeysTable(results []models.ValidationResult) {
 			statusStr = "⚠ " + res.StatusNote
 		}
 
+		if res.StatusCode > 0 && res.StatusCode != 200 {
+			switch res.StatusCode {
+			case 201:
+				statusStr = "✓ Created"
+			case 204:
+				statusStr = "✓ No Content"
+			default:
+				statusStr = fmt.Sprintf("⚠ %d", res.StatusCode)
+			}
+		}
+
+		if res.Extra != nil {
+			if disabled, ok := res.Extra["disabled"].(bool); ok && disabled {
+				statusStr = "⚠ Disabled"
+			}
+			if blocked, ok := res.Extra["blocked"].(bool); ok && blocked {
+				statusStr = "⚠ Blocked"
+			}
+			if inactive, ok := res.Extra["inactive"].(bool); ok && inactive {
+				statusStr = "⚠ Inactive"
+			}
+		}
+
 		tableData = append(tableData, []string{
 			pterm.Cyan(res.Provider),
 			keyMasked,
@@ -574,7 +619,38 @@ func (r *Runner) displayInvalidKeysTable(results []models.ValidationResult) {
 
 		statusStr := "✗ Invalid"
 		if res.StatusCode > 0 {
-			statusStr = fmt.Sprintf("✗ %d", res.StatusCode)
+			switch res.StatusCode {
+			case 401:
+				statusStr = "✗ Unauthorized"
+			case 403:
+				statusStr = "✗ Forbidden"
+			case 404:
+				statusStr = "✗ Not Found"
+			case 429:
+				statusStr = "✗ Rate Limited"
+			case 500:
+				statusStr = "✗ Server Error"
+			case 502, 503, 504:
+				statusStr = fmt.Sprintf("✗ Bad Gateway (%d)", res.StatusCode)
+			default:
+				statusStr = fmt.Sprintf("✗ %d", res.StatusCode)
+			}
+		}
+
+		if strings.Contains(strings.ToLower(res.ErrorMessage), "disabled") {
+			statusStr = "✗ Disabled"
+		} else if strings.Contains(strings.ToLower(res.ErrorMessage), "blocked") {
+			statusStr = "✗ Blocked"
+		} else if strings.Contains(strings.ToLower(res.ErrorMessage), "expired") {
+			statusStr = "✗ Expired"
+		} else if strings.Contains(strings.ToLower(res.ErrorMessage), "revok") {
+			statusStr = "✗ Revoked"
+		} else if strings.Contains(strings.ToLower(res.ErrorMessage), "invalid") {
+			statusStr = "✗ Invalid Key"
+		} else if strings.Contains(strings.ToLower(res.ErrorMessage), "quota") {
+			statusStr = "✗ Quota Exceeded"
+		} else if strings.Contains(strings.ToLower(res.ErrorMessage), "insufficient") {
+			statusStr = "✗ Insufficient"
 		}
 
 		tableData = append(tableData, []string{
