@@ -200,3 +200,90 @@ func GetAllProviders() ([]ProviderInfo, error) {
 
 	return providers, nil
 }
+
+func GetCategories() ([]string, error) {
+	configs, err := LoadProviderConfigs()
+	if err != nil {
+		return nil, err
+	}
+
+	categorySet := make(map[string]bool)
+	for _, cfg := range configs {
+		if cfg.Category != "" {
+			categorySet[cfg.Category] = true
+		}
+	}
+
+	categories := make([]string, 0, len(categorySet))
+	for cat := range categorySet {
+		categories = append(categories, cat)
+	}
+	sort.Strings(categories)
+	return categories, nil
+}
+
+func GetProvidersByCategory(category string) ([]ProviderInfo, error) {
+	configs, err := LoadProviderConfigs()
+	if err != nil {
+		return nil, err
+	}
+
+	var providers []ProviderInfo
+	for _, cfg := range configs {
+		if cfg.Category == category {
+			providers = append(providers, ProviderInfo{
+				Name:        cfg.Name,
+				Category:    cfg.Category,
+				KeyPrefixes: cfg.KeyPrefixes,
+			})
+		}
+	}
+	return providers, nil
+}
+
+type ProviderGroup struct {
+	Prefix    string
+	Providers []ProviderInfo
+}
+
+func GetProviderGroups() (map[string][]ProviderInfo, error) {
+	configs, err := LoadProviderConfigs()
+	if err != nil {
+		return nil, err
+	}
+
+	groupMap := make(map[string][]ProviderInfo)
+	for _, cfg := range configs {
+		if len(cfg.KeyPrefixes) > 0 {
+			prefix := cfg.KeyPrefixes[0]
+			groupMap[prefix] = append(groupMap[prefix], ProviderInfo{
+				Name:        cfg.Name,
+				Category:    cfg.Category,
+				KeyPrefixes: cfg.KeyPrefixes,
+			})
+		}
+	}
+
+	return groupMap, nil
+}
+
+func FindProviderByName(name string) ([]ProviderInfo, error) {
+	configs, err := LoadProviderConfigs()
+	if err != nil {
+		return nil, err
+	}
+
+	nameLower := strings.ToLower(name)
+	var providers []ProviderInfo
+	for _, cfg := range configs {
+		cfgNameLower := strings.ToLower(cfg.Name)
+		if strings.HasPrefix(cfgNameLower, nameLower+"_") || cfgNameLower == nameLower {
+			providers = append(providers, ProviderInfo{
+				Name:        cfg.Name,
+				Category:    cfg.Category,
+				KeyPrefixes: cfg.KeyPrefixes,
+			})
+		}
+	}
+	return providers, nil
+}
