@@ -31,3 +31,8 @@ func NewDetector() *Detector {
 func (d *Detector) DetectProvider(apiKey string, manualCategory string) string {
 	return DetectProviderFromIndex(strings.TrimSpace(apiKey), d.prefixes, d.patterns, manualCategory)
 }
+
+// DetectProviderWithSuggestion returns detection result with suggestions if detection fails
+func (d *Detector) DetectProviderWithSuggestion(apiKey string, manualCategory string) DetectionResult {
+	return DetectProviderWithSuggestion(strings.TrimSpace(apiKey), d.prefixes, d.patterns, manualCategory)
+}

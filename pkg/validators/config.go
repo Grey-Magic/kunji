@@ -156,22 +156,68 @@ func sortPatternsBySpecificity(patterns []PatternEntry) {
 func DetectProviderFromIndex(key string, prefixes []PrefixEntry, patterns []PatternEntry, manualCategory string) string {
 	key = strings.TrimSpace(key)
 
+	if key == "" {
+		return "unknown"
+	}
+
+	type match struct {
+		provider string
+		prefix   string
+		length   int
+	}
+
+	var matches []match
 	for _, p := range prefixes {
 		if manualCategory != "" && p.Category != manualCategory {
 			continue
 		}
 		if strings.HasPrefix(key, p.Prefix) {
-			return p.Provider
+			matches = append(matches, match{provider: p.Provider, prefix: p.Prefix, length: len(p.Prefix)})
 		}
 	}
+
+	if len(matches) == 1 {
+		return matches[0].provider
+	}
+
+	if len(matches) > 1 {
+		maxLen := 0
+		for _, m := range matches {
+			if m.length > maxLen {
+				maxLen = m.length
+			}
+		}
+		var longestMatches []match
+		for _, m := range matches {
+			if m.length == maxLen {
+				longestMatches = append(longestMatches, m)
+			}
+		}
+		if len(longestMatches) == 1 {
+			return longestMatches[0].provider
+		}
+		return "unknown"
+	}
+
+	patternProviders := make(map[string]bool)
 
 	for _, p := range patterns {
 		if manualCategory != "" && p.Category != manualCategory {
 			continue
 		}
 		if p.Regex.MatchString(key) {
-			return p.Provider
+			patternProviders[p.Provider] = true
 		}
+	}
+
+	if len(patternProviders) == 1 {
+		for provider := range patternProviders {
+			return provider
+		}
+	}
+
+	if len(patternProviders) > 1 {
+		return "unknown"
 	}
 
 	return "unknown"
@@ -286,4 +332,168 @@ func FindProviderByName(name string) ([]ProviderInfo, error) {
 		}
 	}
 	return providers, nil
+}
+
+// DetectionResult contains detection result with optional suggestions
+type DetectionResult struct {
+	Provider    string
+	Suggestions []string
+	Message     string
+}
+
+// DetectProviderWithSuggestion detects provider and provides suggestions if detection fails
+func DetectProviderWithSuggestion(key string, prefixes []PrefixEntry, patterns []PatternEntry, manualCategory string) DetectionResult {
+	key = strings.TrimSpace(key)
+
+	if key == "" {
+		return DetectionResult{
+			Provider: "unknown",
+			Message:  "Empty key provided",
+		}
+	}
+
+	type match struct {
+		provider string
+		prefix   string
+		length   int
+	}
+
+	var matches []match
+	for _, p := range prefixes {
+		if manualCategory != "" && p.Category != manualCategory {
+			continue
+		}
+		if strings.HasPrefix(key, p.Prefix) {
+			matches = append(matches, match{provider: p.Provider, prefix: p.Prefix, length: len(p.Prefix)})
+		}
+	}
+
+	if len(matches) == 1 {
+		return DetectionResult{
+			Provider: matches[0].provider,
+		}
+	}
+
+	if len(matches) > 1 {
+		maxLen := 0
+		for _, m := range matches {
+			if m.length > maxLen {
+				maxLen = m.length
+			}
+		}
+		var longestMatches []match
+		for _, m := range matches {
+			if m.length == maxLen {
+				longestMatches = append(longestMatches, m)
+			}
+		}
+		if len(longestMatches) == 1 {
+			return DetectionResult{
+				Provider: longestMatches[0].provider,
+			}
+		}
+		// Multiple matches with same prefix length - return suggestions
+		var providerNames []string
+		seen := make(map[string]bool)
+		for _, m := range matches {
+			if !seen[m.provider] {
+				seen[m.provider] = true
+				providerNames = append(providerNames, m.provider)
+			}
+		}
+		suggestions := generateSuggestions(key, prefixes)
+		return DetectionResult{
+			Provider:    "unknown",
+			Suggestions: suggestions,
+			Message:     fmt.Sprintf("Ambiguous key - matches: %s", strings.Join(providerNames, ", ")),
+		}
+	}
+
+	// No prefix matches - try patterns
+	patternProviders := make(map[string]bool)
+
+	for _, p := range patterns {
+		if manualCategory != "" && p.Category != manualCategory {
+			continue
+		}
+		if p.Regex.MatchString(key) {
+			patternProviders[p.Provider] = true
+		}
+	}
+
+	if len(patternProviders) == 1 {
+		for provider := range patternProviders {
+			return DetectionResult{
+				Provider: provider,
+			}
+		}
+	}
+
+	if len(patternProviders) > 1 {
+		var providerNames []string
+		for p := range patternProviders {
+			providerNames = append(providerNames, p)
+		}
+		suggestions := generateSuggestions(key, prefixes)
+		return DetectionResult{
+			Provider:    "unknown",
+			Suggestions: suggestions,
+			Message:     fmt.Sprintf("Ambiguous key - matches: %s", strings.Join(providerNames, ", ")),
+		}
+	}
+
+	// No matches at all - generate suggestions
+	suggestions := generateSuggestions(key, prefixes)
+	return DetectionResult{
+		Provider:    "unknown",
+		Suggestions: suggestions,
+		Message:     "Could not auto-detect provider",
+	}
+}
+
+// generateSuggestions finds providers with similar prefixes
+func generateSuggestions(key string, prefixes []PrefixEntry) []string {
+	keyLower := strings.ToLower(key)
+
+	// Find prefixes that partially match
+	var suggestions []string
+	seen := make(map[string]bool)
+
+	// First, check for any prefix match (even partial)
+	for _, p := range prefixes {
+		if len(p.Prefix) < 3 {
+			continue
+		}
+		// Check if key starts with same characters as prefix
+		if strings.HasPrefix(keyLower, p.Prefix[:min(len(p.Prefix), len(key))]) {
+			if !seen[p.Provider] {
+				seen[p.Provider] = true
+				suggestions = append(suggestions, p.Provider)
+			}
+		}
+	}
+
+	// If no prefix matches, suggest providers with common prefixes
+	if len(suggestions) == 0 {
+		commonPrefixes := []string{"sk-", "sk_", "api_", "key-", "pk.", "token"}
+		for _, cp := range commonPrefixes {
+			if strings.HasPrefix(keyLower, cp) || (len(key) > 3 && strings.Contains(keyLower, cp)) {
+				for _, p := range prefixes {
+					if strings.HasPrefix(strings.ToLower(p.Prefix), cp) || p.Prefix == cp {
+						if !seen[p.Provider] {
+							seen[p.Provider] = true
+							suggestions = append(suggestions, p.Provider)
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// Limit to top 5 suggestions
+	if len(suggestions) > 5 {
+		suggestions = suggestions[:5]
+	}
+
+	return suggestions
 }
