@@ -284,20 +284,33 @@ func (r *Runner) worker(jobs <-chan string, results chan<- *models.ValidationRes
 
 	for key := range jobs {
 		var providerName string
+		var suggestions []string
 
 		if r.ManualProvider != "" {
 			providerName = r.ManualProvider
 		} else {
-			providerName = r.Detector.DetectProvider(key, r.ManualCategory)
+			detectionResult := r.Detector.DetectProviderWithSuggestion(key, r.ManualCategory)
+			providerName = detectionResult.Provider
+			suggestions = detectionResult.Suggestions
 		}
 
 		val, exists := r.Validators[providerName]
 		if !exists {
+			errMsg := "Unknown provider or unsupported key format"
+			if r.ManualProvider == "" && providerName == "unknown" {
+				if len(suggestions) > 0 {
+					errMsg = fmt.Sprintf("Could not auto-detect provider. Use -p flag to specify manually. Did you mean: %s?", strings.Join(suggestions, ", "))
+				} else {
+					errMsg = "Could not auto-detect provider. Use -p flag to specify manually (e.g., -p openai)"
+				}
+			} else if r.ManualProvider != "" && providerName == r.ManualProvider {
+				errMsg = fmt.Sprintf("Provider '%s' not found. Use 'kunji providers' to list available providers", r.ManualProvider)
+			}
 			results <- &models.ValidationResult{
 				Key:          key,
 				Provider:     providerName,
 				IsValid:      false,
-				ErrorMessage: "Unknown provider or unsupported key format",
+				ErrorMessage: errMsg,
 				ResponseTime: 0,
 			}
 			continue
