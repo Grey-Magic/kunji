@@ -35,7 +35,8 @@
 
 - name: cloudflare
   category: infrastructure
-  key_patterns: ["^[a-zA-Z0-9_-]{35,45}$"]
+  key_prefixes: ["cloudflare_"]
+  key_patterns: ["^cloudflare_[a-f0-9]{37}$"]
   validation:
     method: GET
     url: "https://api.cloudflare.com/client/v4/user/tokens/verify"
@@ -88,7 +89,8 @@
 
 - name: lokalise
   category: localization
-  key_patterns: ["^[a-f0-9]{40}$"]
+  key_prefixes: ["lo-"]
+  key_patterns: ["^lo-[a-f0-9]{40}$"]
   validation:
     method: GET
     url: "https://api.lokalise.com/api2/projects/"
@@ -98,7 +100,8 @@
 
 - name: ipstack
   category: api
-  key_patterns: ["^[a-f0-9]{32}$"]
+  key_prefixes: ["ipstack_"]
+  key_patterns: ["^ipstack_[a-f0-9]{32}$"]
   validation:
     method: GET
     url: "https://api.ipstack.com/check"
@@ -171,7 +174,8 @@
 
 - name: heroku
   category: infrastructure
-  key_patterns: ["(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"]
+  key_prefixes: ["heroku_", "HRKU-"]
+  key_patterns: ["^heroku_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", "^HRKU-[A-Za-z0-9_-]{50,}$"]
   validation:
     method: GET
     url: "https://api.heroku.com/account"
@@ -210,7 +214,8 @@
 
 - name: datadog
   category: monitoring
-  key_patterns: ["(?i)^[a-f0-9]{32}$"]
+  key_prefixes: ["DD_API_", "DD_APP_"]
+  key_patterns: ["(?i)^DD_API_[a-f0-9]{32}$", "(?i)^DD_APP_[a-f0-9]{40}$"]
   validation:
     method: GET
     url: "https://api.datadoghq.com/api/v1/user/me"
@@ -269,7 +274,8 @@
 
 - name: hubspot
   category: marketing
-  key_patterns: ["^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$"]
+  key_prefixes: ["pat-", "hapikey"]
+  key_patterns: ["^pat-na1-[a-f0-9-]{36,}$", "^hapikey[0-9a-zA-Z]{8,}$"]
   validation:
     method: GET
     url: "https://api.hubapi.com/owners/v2/owners"
@@ -280,7 +286,8 @@
 
 - name: jumpcloud
   category: security
-  key_patterns: ["^[a-f0-9]{40}$"]
+  key_prefixes: ["jumpcloud_"]
+  key_patterns: ["^jumpcloud_[a-f0-9]{40}$"]
   validation:
     method: GET
     url: "https://console.jumpcloud.com/api/systemusers"
@@ -507,7 +514,7 @@
     method: POST
     url: "https://safebrowsing.googleapis.com/v4/threatMatches:find?key={{key}}"
     auth: "none"
-    body: '{"client":{"clientId":"kunji","clientVersion":"1.0.2"},"threatInfo":{"threatTypes":["MALWARE","SOCIAL_ENGINEERING"],"platformTypes":["ANY_PLATFORM"],"threatEntryTypes":["URL"],"threatEntries":[{"url":"http://example.com"}]}}'
+    body: '{"client":{"clientId":"kunji","clientVersion":"1.0.3"},"threatInfo":{"threatTypes":["MALWARE","SOCIAL_ENGINEERING"],"platformTypes":["ANY_PLATFORM"],"threatEntryTypes":["URL"],"threatEntries":[{"url":"http://example.com"}]}}'
   metadata_from_validation:
     name_path: "matches"
 
@@ -739,17 +746,6 @@
   metadata_from_validation:
     name_path: "token_type"
 
-- name: infura
-  category: infrastructure
-  key_patterns: ["^[a-f0-9]{32}$"]
-  validation:
-    method: POST
-    url: "https://mainnet.infura.io/v3/{{key}}"
-    auth: "none"
-    headers:
-      Content-Type: "application/json"
-    body: '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}'
-
 - name: deviantart_secret
   category: api
   key_patterns: ["^[0-9]{4,5}:[a-f0-9]{32}$"]
@@ -796,7 +792,7 @@
 - name: mailgun
   category: email
   key_prefixes: ["key-"]
-  key_patterns: ["^key-[a-f0-9]{32}$"]
+  key_patterns: ["^key-[a-f0-9]{48}$"]
   validation:
     method: GET
     url: "https://api.mailgun.net/v3/domains"

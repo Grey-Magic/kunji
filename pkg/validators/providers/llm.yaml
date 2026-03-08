@@ -1,7 +1,7 @@
 - name: anthropic
   category: llm
-  key_prefixes: ["sk-ant-", "anthropic-"]
-  key_patterns: ["^anthropic-", "^sk-ant-"]
+  key_prefixes: ["sk-ant-api03-", "sk-ant-", "anthropic-"]
+  key_patterns: ["^sk-ant-api03-[a-zA-Z0-9_-]{20,}$", "^anthropic-[a-zA-Z0-9_-]{20,}$"]
   validation:
     method: POST
     url: "https://api.anthropic.com/v1/messages"
@@ -20,8 +20,8 @@
 
 - name: deepseek
   category: llm
-  key_prefixes: ["sk-"]
-  key_patterns: ["^sk-[a-fA-F0-9]{32}$"]
+  key_prefixes: ["sk-deepseek-"]
+  key_patterns: ["^sk-deepseek-[a-fA-F0-9]{32}$"]
   validation:
     method: POST
     url: "https://api.deepseek.com/chat/completions"
@@ -103,8 +103,8 @@
 
 - name: qwen
   category: llm
-  key_prefixes: []
-  key_patterns: ["^sk-[a-z0-9]+$"]
+  key_prefixes: ["sk-qwen-", "sk-dashscope-"]
+  key_patterns: ["^sk-qwen-[a-z0-9]+$", "^sk-dashscope-[a-z0-9]+$"]
   validation:
     method: POST
     url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions"
@@ -118,8 +118,8 @@
 
 - name: kimi
   category: llm
-  key_prefixes: []
-  key_patterns: ["^sk-[a-zA-Z0-9]+$"]
+  key_prefixes: ["sk-kimi-", "sk-moonshot-"]
+  key_patterns: ["^sk-kimi-[a-zA-Z0-9_-]+$", "^sk-moonshot-[a-zA-Z0-9_-]+$"]
   validation:
     method: POST
     url: "https://api.moonshot.cn/v1/chat/completions"
@@ -163,8 +163,8 @@
 
 - name: openai
   category: llm
-  key_prefixes: ["sk-proj-", "sk-svcacct-", "sk-"]
-  key_patterns: ["^sk-[a-zA-Z0-9]{32,}$"]
+  key_prefixes: ["sk-proj-", "sk-svcacct-", "sk-ant-", "sk-"]
+  key_patterns: ["^sk-proj-[a-zA-Z0-9_-]{20,}$", "^sk-svcacct-[a-zA-Z0-9_-]{20,}$", "^sk-ant-[a-zA-Z0-9_-]{20,}$", "^sk-[a-zA-Z0-9]{32,}$"]
   validation:
     method: POST
     url: "https://api.openai.com/v1/chat/completions"
@@ -185,8 +185,8 @@
 
 - name: mistral
   category: llm
-  key_prefixes: []
-  key_patterns: ["^[a-zA-Z0-9]{32}$"]
+  key_prefixes: ["mistral-"]
+  key_patterns: ["^mistral-[a-zA-Z0-9]{32}$"]
   validation:
     method: GET
     url: "https://api.mistral.ai/v1/users/me"
@@ -196,8 +196,8 @@
 
 - name: cohere
   category: llm
-  key_prefixes: []
-  key_patterns: ["^[a-zA-Z0-9_-]{40}$"]
+  key_prefixes: ["cohere-"]
+  key_patterns: ["^cohere-[a-zA-Z0-9_-]{40}$"]
   validation:
     method: POST
     url: "https://api.cohere.com/v1/check-api-key"
@@ -227,8 +227,8 @@
 
 - name: together
   category: llm
-  key_prefixes: []
-  key_patterns: ["^[a-f0-9]{64}$"]
+  key_prefixes: ["together-"]
+  key_patterns: ["^together-[a-f0-9]{64}$"]
   validation:
     method: GET
     url: "https://api.together.ai/v1/models"
@@ -246,7 +246,7 @@
 - name: novita
   category: llm
   key_prefixes: ["novita-"]
-  key_patterns: ["^novita-[a-zA-Z0-9]{32,}$", "^[a-f0-9]{32,}$"]
+  key_patterns: ["^novita-[a-zA-Z0-9]{32,}$"]
   validation:
     method: POST
     url: "https://api.novita.ai/v3/chat/completions"
@@ -275,7 +275,7 @@
 - name: elevenlabs
   category: llm
   key_prefixes: ["sk_"]
-  key_patterns: ["^sk_[a-f0-9]{32}$", "^[a-f0-9]{32}$"]
+  key_patterns: ["^sk_[a-f0-9]{32}$"]
   validation:
     method: GET
     url: "https://api.elevenlabs.io/v1/user"
