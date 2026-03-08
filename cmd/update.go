@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	currentVersion = "1.0.2"
+	currentVersion = "1.0.3"
 	githubRepo     = "Grey-Magic/kunji"
 )
 
