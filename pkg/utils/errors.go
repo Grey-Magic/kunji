@@ -3,10 +3,39 @@ package utils
 import (
 	"encoding/json"
 	"fmt"
+	"net"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
 )
+
+func ValidateURL(rawURL string) error {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return fmt.Errorf("invalid URL: %v", err)
+	}
+
+	host := u.Hostname()
+	if host == "localhost" || host == "127.0.0.1" || host == "::1" {
+		return fmt.Errorf("SSRF prevention: local hostnames are not allowed")
+	}
+
+	ips, err := net.LookupIP(host)
+	if err != nil {
+		// If DNS lookup fails, we can't verify IP but the request will likely fail anyway.
+		// For dynamic subdomains, this might happen.
+		return nil
+	}
+
+	for _, ip := range ips {
+		if ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsPrivate() {
+			return fmt.Errorf("SSRF prevention: private/local IP addresses are not allowed (%s)", ip.String())
+		}
+	}
+
+	return nil
+}
 
 type ValidationError struct {
 	Code    string
@@ -38,8 +67,8 @@ var (
 	ErrUnknown       = &ValidationError{Code: "UNKNOWN", Message: "Unknown error"}
 )
 
-func ParseErrorFromResponse(body []byte, statusCode int) *ValidationError {
-	msg := ParseAPIError(body)
+func ParseErrorFromResponse(body []byte, statusCode int, apiKey string) *ValidationError {
+	msg := ParseAPIError(body, apiKey)
 
 	lowerMsg := strings.ToLower(msg)
 
@@ -69,56 +98,55 @@ func ParseErrorFromResponse(body []byte, statusCode int) *ValidationError {
 	}
 }
 
-func ParseAPIError(body []byte) string {
+func ParseAPIError(body []byte, apiKey string) string {
 	if len(body) == 0 {
 		return "Unknown error (empty body)"
 	}
 
+	var msg string
 	var jsonErr map[string]interface{}
 	if err := json.Unmarshal(body, &jsonErr); err == nil {
 
-		if msg, ok := jsonErr["error"].(string); ok {
-			return enhanceErrorMessage(msg, jsonErr)
-		}
-
-		if errObj, ok := jsonErr["error"].(map[string]interface{}); ok {
-			if msg, ok := errObj["message"].(string); ok {
-				return enhanceErrorMessage(msg, jsonErr)
+		if m, ok := jsonErr["error"].(string); ok {
+			msg = enhanceErrorMessage(m, jsonErr)
+		} else if errObj, ok := jsonErr["error"].(map[string]interface{}); ok {
+			if m, ok := errObj["message"].(string); ok {
+				msg = enhanceErrorMessage(m, jsonErr)
+			} else if m, ok := errObj["type"].(string); ok {
+				msg = enhanceErrorMessage(m, jsonErr)
 			}
-			if msg, ok := errObj["type"].(string); ok {
-				return enhanceErrorMessage(msg, jsonErr)
-			}
+		} else if m, ok := jsonErr["message"].(string); ok {
+			msg = enhanceErrorMessage(m, jsonErr)
+		} else if m, ok := jsonErr["msg"].(string); ok {
+			msg = enhanceErrorMessage(m, jsonErr)
+		} else if code, ok := jsonErr["code"].(string); ok {
+			msg = enhanceErrorMessage(code, jsonErr)
+		} else if status, ok := jsonErr["status"].(string); ok {
+			msg = enhanceErrorMessage(status, jsonErr)
+		} else if detail, ok := jsonErr["detail"].(string); ok {
+			msg = enhanceErrorMessage(detail, jsonErr)
+		} else {
+			strBytes, _ := json.Marshal(jsonErr)
+			msg = string(strBytes)
 		}
-
-		if msg, ok := jsonErr["message"].(string); ok {
-			return enhanceErrorMessage(msg, jsonErr)
-		}
-
-		if msg, ok := jsonErr["msg"].(string); ok {
-			return enhanceErrorMessage(msg, jsonErr)
-		}
-
-		if code, ok := jsonErr["code"].(string); ok {
-			return enhanceErrorMessage(code, jsonErr)
-		}
-
-		if status, ok := jsonErr["status"].(string); ok {
-			return enhanceErrorMessage(status, jsonErr)
-		}
-
-		if detail, ok := jsonErr["detail"].(string); ok {
-			return enhanceErrorMessage(detail, jsonErr)
-		}
-
-		strBytes, _ := json.Marshal(jsonErr)
-		return truncateStr(string(strBytes), 150)
+	} else {
+		msg = strings.TrimSpace(string(body))
+		msg = strings.ReplaceAll(msg, "\n", " ")
+		msg = strings.ReplaceAll(msg, "\r", "")
 	}
 
-	rawStr := strings.TrimSpace(string(body))
+	if apiKey != "" {
+		msg = strings.ReplaceAll(msg, apiKey, "[MASKED_KEY]")
+	}
 
-	rawStr = strings.ReplaceAll(rawStr, "\n", " ")
-	rawStr = strings.ReplaceAll(rawStr, "\r", "")
-	return truncateStr(rawStr, 150)
+	return truncateStr(msg, 150)
+}
+
+func ScrubAPIKey(msg, apiKey string) string {
+	if apiKey == "" {
+		return msg
+	}
+	return strings.ReplaceAll(msg, apiKey, "[MASKED_KEY]")
 }
 
 func enhanceErrorMessage(msg string, jsonErr map[string]interface{}) string {
@@ -167,8 +195,13 @@ func ParseRetryAfter(respHeaders map[string][]string) int {
 			if sec > 86400 {
 				ts := time.Now().Unix()
 				if int64(sec) > ts {
-					sec = int(ts) - sec
+					sec = int(int64(sec) - ts)
+				} else {
+					sec = 0
 				}
+			}
+			if sec < 0 {
+				sec = 0
 			}
 			return sec
 		}
