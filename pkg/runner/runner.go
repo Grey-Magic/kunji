@@ -7,6 +7,7 @@ import (
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
+	"io"
 	"math/big"
 	"os"
 	"os/signal"
@@ -57,7 +58,8 @@ func NewRunner(threads int, proxy string, retries int, timeout int, out string, 
 }
 
 func (r *Runner) LoadAndFilterKeys(singleKey, keyFile string) ([]string, error) {
-	rawKeys := []string{}
+	spinner, _ := pterm.DefaultSpinner.Start("Loading and filtering keys...")
+	rawKeys := make([]string, 0)
 
 	if singleKey != "" {
 		rawKeys = append(rawKeys, singleKey)
@@ -66,6 +68,7 @@ func (r *Runner) LoadAndFilterKeys(singleKey, keyFile string) ([]string, error) 
 	if keyFile != "" {
 		file, err := os.Open(keyFile)
 		if err != nil {
+			spinner.Fail("Failed to open keys file")
 			return nil, err
 		}
 		defer file.Close()
@@ -103,8 +106,7 @@ func (r *Runner) LoadAndFilterKeys(singleKey, keyFile string) ([]string, error) 
 	for _, k := range rawKeys {
 		k = strings.TrimSpace(k)
 
-		if len(k) >= r.MinKeyLength && !strings.Contains(k, " ") {
-
+		if len(k) >= r.MinKeyLength {
 			if alreadyProcessed[k] {
 				continue
 			}
@@ -116,6 +118,7 @@ func (r *Runner) LoadAndFilterKeys(singleKey, keyFile string) ([]string, error) 
 		}
 	}
 
+	spinner.Success(fmt.Sprintf("Loaded %d unique keys.", len(finalKeys)))
 	return finalKeys, nil
 }
 
@@ -180,7 +183,9 @@ func (r *Runner) Run(keys []string) {
 	shouldWriteHeader := r.shouldWriteHeader()
 
 	if shouldWriteHeader && csvWriter != nil {
-		csvWriter.Write([]string{"Key", "Provider", "IsValid", "StatusCode", "ResponseTime", "Balance", "AccountName", "Email", "Error"})
+		if err := csvWriter.Write([]string{"Key", "Provider", "IsValid", "StatusCode", "ResponseTime", "Balance", "AccountName", "Email", "Error"}); err != nil {
+			pterm.Warning.Printfln("Failed to write CSV header: %v", err)
+		}
 		csvWriter.Flush()
 	}
 
@@ -191,15 +196,23 @@ func (r *Runner) Run(keys []string) {
 	}
 
 	updateCounter := 0
+	updateCounterMutex := sync.Mutex{}
 	var progressTicker *time.Ticker
 	if p != nil {
 		progressTicker = time.NewTicker(100 * time.Millisecond)
 		defer progressTicker.Stop()
 	}
 
+	// Live UI Area for worker status
+	area, _ := pterm.DefaultArea.Start()
+	defer area.Stop()
+
+	lastResults := make([]*models.ValidationResult, 0, 5)
+
 	for {
 		select {
 		case <-progressTicker.C:
+			updateCounterMutex.Lock()
 			if p != nil && updateCounter > 0 {
 				current := p.Current
 				if current < len(keys) {
@@ -207,18 +220,42 @@ func (r *Runner) Run(keys []string) {
 				}
 				updateCounter = 0
 			}
+
+			// Update live area
+			var areaText string
+			for i := len(lastResults) - 1; i >= 0; i-- {
+				res := lastResults[i]
+				status := pterm.Red("✗ Invalid")
+				if res.IsValid {
+					status = pterm.Green("✓ Valid")
+				}
+				keyMasked := maskKey(res.Key)
+				areaText += fmt.Sprintf("  %s %-15s %s %s\n", pterm.Gray("»"), pterm.LightCyan(res.Provider), status, pterm.Gray(keyMasked))
+			}
+			area.Update(areaText)
+			updateCounterMutex.Unlock()
+
 		case res, ok := <-results:
 			if !ok {
+				updateCounterMutex.Lock()
 				if p != nil && updateCounter > 0 {
 					p.Add(updateCounter)
 				}
+				updateCounterMutex.Unlock()
 				goto done
 			}
 			if res.IsValid {
 				validCount++
 			}
 
+			updateCounterMutex.Lock()
 			updateCounter++
+			// Track last 5 results for live area
+			lastResults = append(lastResults, res)
+			if len(lastResults) > 5 {
+				lastResults = lastResults[1:]
+			}
+			updateCounterMutex.Unlock()
 
 			if r.OutFile != "" {
 				if collectAllResults {
@@ -234,10 +271,10 @@ func (r *Runner) Run(keys []string) {
 	}
 
 done:
-
 	if p != nil {
 		p.Stop()
 	}
+	area.Stop()
 
 	pterm.Println()
 
@@ -259,24 +296,24 @@ done:
 		validPercent = (validCount * 100) / len(keys)
 	}
 
-	validColor := pterm.Green
+	validColor := pterm.FgGreen
 	if validPercent < 50 {
-		validColor = pterm.Yellow
+		validColor = pterm.FgYellow
 	}
 
+	stats := pterm.TableData{
+		{pterm.LightCyan("Metric"), pterm.LightCyan("Value")},
+		{"Total Keys", fmt.Sprintf("%d", len(keys))},
+		{"Valid Keys", pterm.NewStyle(validColor).Sprint(validCount)},
+		{"Invalid Keys", pterm.Red(len(keys) - validCount)},
+		{"Throughput", fmt.Sprintf("%.2f keys/s", keysPerSec)},
+		{"Total Time", duration.Round(time.Millisecond).String()},
+	}
+
+	pterm.DefaultSection.Println("Validation Summary")
+	summaryTable, _ := pterm.DefaultTable.WithHasHeader().WithData(stats).Srender()
+	pterm.DefaultBox.WithTitle("Results").Println(summaryTable)
 	pterm.Println()
-	pterm.Println(pterm.Cyan("┌────────────────────────────────────────┐"))
-	pterm.Printf(pterm.Cyan("│")+" %-11s %s "+pterm.Cyan("│\n"),
-		pterm.LightCyan("Total:"), pterm.Bold.Sprint(len(keys)))
-	pterm.Printf(pterm.Cyan("│")+" %-11s %s "+pterm.Cyan("│\n"),
-		pterm.LightCyan("Valid:"), validColor(pterm.Bold.Sprint(validCount)))
-	pterm.Printf(pterm.Cyan("│")+" %-11s %s "+pterm.Cyan("│\n"),
-		pterm.LightCyan("Invalid:"), pterm.Red(pterm.Bold.Sprint(len(keys)-validCount)))
-	pterm.Printf(pterm.Cyan("│")+" %-11s %s "+pterm.Cyan("│\n"),
-		pterm.LightCyan("Speed:"), pterm.Bold.Sprintf("%.2f/s", keysPerSec))
-	pterm.Printf(pterm.Cyan("│")+" %-11s %s "+pterm.Cyan("│\n"),
-		pterm.LightCyan("Time:"), pterm.Bold.Sprint(duration.Round(time.Millisecond)))
-	pterm.Println(pterm.Cyan("└────────────────────────────────────────┘"))
 }
 
 func (r *Runner) worker(jobs <-chan string, results chan<- *models.ValidationResult, wg *sync.WaitGroup) {
@@ -317,9 +354,21 @@ func (r *Runner) worker(jobs <-chan string, results chan<- *models.ValidationRes
 		}
 
 		var finalRes *models.ValidationResult
+		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(r.Timeout)*time.Second*time.Duration(r.Retries+1))
+		defer cancel()
+
 		for attempt := 0; attempt <= r.Retries; attempt++ {
-			ctx, cancel := context.WithTimeout(context.Background(), time.Duration(r.Timeout)*time.Second)
-			defer cancel()
+			select {
+			case <-ctx.Done():
+				finalRes = &models.ValidationResult{
+					Key:          key,
+					Provider:     providerName,
+					IsValid:      false,
+					ErrorMessage: "Request Timeout",
+				}
+				break
+			default:
+			}
 
 			res, err := val.Validate(ctx, key)
 
@@ -372,6 +421,15 @@ func (r *Runner) worker(jobs <-chan string, results chan<- *models.ValidationRes
 			finalRes = res
 			break
 		}
+
+		if finalRes == nil {
+			finalRes = &models.ValidationResult{
+				Key:          key,
+				Provider:     providerName,
+				IsValid:      false,
+				ErrorMessage: "Validation failed - all retries exhausted",
+			}
+		}
 		results <- finalRes
 	}
 }
@@ -383,7 +441,7 @@ func (r *Runner) openResultFile() (*os.File, error) {
 
 	flag := os.O_APPEND | os.O_CREATE | os.O_WRONLY
 
-	return os.OpenFile(r.OutFile, flag, 0644)
+	return os.OpenFile(r.OutFile, flag, 0600)
 }
 
 func (r *Runner) shouldWriteHeader() bool {
@@ -718,7 +776,7 @@ func (r *Runner) exportJSON(results []models.ValidationResult) {
 		return
 	}
 
-	if err := os.WriteFile(r.OutFile, data, 0644); err != nil {
+	if err := os.WriteFile(r.OutFile, data, 0600); err != nil {
 		pterm.Error.Printfln("Error writing %s: %v", r.OutFile, err)
 		return
 	}
@@ -771,15 +829,17 @@ func (r *Runner) loadExistingKeys() map[string]bool {
 			return existing
 		}
 
-		records, err := reader.ReadAll()
-		if err != nil {
-			pterm.Warning.Printfln("Error reading CSV: %v", err)
-			return existing
-		}
-
-		for _, row := range records {
-			if len(row) > 0 {
-				existing[row[0]] = true
+		for {
+			record, err := reader.Read()
+			if err == io.EOF {
+				break
+			}
+			if err != nil {
+				pterm.Warning.Printfln("Error reading CSV: %v", err)
+				break
+			}
+			if len(record) > 0 {
+				existing[record[0]] = true
 			}
 		}
 		return existing
@@ -802,8 +862,8 @@ func (r *Runner) loadExistingKeys() map[string]bool {
 
 func (r *Runner) addJitter(d time.Duration) time.Duration {
 	maxJitterMs := d.Milliseconds() / 4
-	if maxJitterMs < 100 {
-		maxJitterMs = 100
+	if maxJitterMs < 50 {
+		maxJitterMs = 50
 	}
 	jitter, _ := rand.Int(rand.Reader, big.NewInt(maxJitterMs))
 	return d + time.Duration(jitter.Int64())*time.Millisecond
