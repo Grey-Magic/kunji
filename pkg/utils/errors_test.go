@@ -51,10 +51,18 @@ func TestParseAPIError(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := ParseAPIError(tt.body)
+			result := ParseAPIError(tt.body, "")
 			assert.Equal(t, tt.expected, result)
 		})
 	}
+
+	t.Run("Scrubbing API Key", func(t *testing.T) {
+		body := []byte(`{"error": "Invalid key: sk-abc123456"}`)
+		key := "sk-abc123456"
+		result := ParseAPIError(body, key)
+		assert.Contains(t, result, "[MASKED_KEY]")
+		assert.NotContains(t, result, key)
+	})
 }
 
 func TestParseRetryAfter(t *testing.T) {
