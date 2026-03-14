@@ -68,6 +68,10 @@ func (v *GenericValidator) Validate(ctx context.Context, apiKey string) (*models
 		bodyReader = strings.NewReader(bodyStr)
 	}
 
+	if err := utils.ValidateURL(url); err != nil {
+		return nil, fmt.Errorf("security error: %w", err)
+	}
+
 	req, err := http.NewRequestWithContext(ctx, cfg.Method, url, bodyReader)
 	if err != nil {
 		return nil, err
@@ -117,25 +121,25 @@ func (v *GenericValidator) Validate(ctx context.Context, apiKey string) (*models
 	case resp.StatusCode == 402:
 		result.IsValid = true
 		result.StatusNote = "No Balance"
-		result.ErrorMessage = utils.ParseAPIError(bodyBytes)
+		result.ErrorMessage = utils.ParseAPIError(bodyBytes, apiKey)
 
 	case resp.StatusCode == 429:
 		result.IsValid = true
 		result.StatusNote = "Rate Limited"
-		result.ErrorMessage = utils.ParseAPIError(bodyBytes)
+		result.ErrorMessage = utils.ParseAPIError(bodyBytes, apiKey)
 
 	case resp.StatusCode >= 500:
 		result.IsValid = true
 		result.StatusNote = fmt.Sprintf("Server Error (%d)", resp.StatusCode)
-		result.ErrorMessage = utils.ParseAPIError(bodyBytes)
+		result.ErrorMessage = utils.ParseAPIError(bodyBytes, apiKey)
 
 	case resp.StatusCode == 401 || resp.StatusCode == 403:
 		result.IsValid = false
-		result.ErrorMessage = utils.ParseAPIError(bodyBytes)
+		result.ErrorMessage = utils.ParseAPIError(bodyBytes, apiKey)
 
 	default:
 		result.IsValid = false
-		result.ErrorMessage = utils.ParseAPIError(bodyBytes)
+		result.ErrorMessage = utils.ParseAPIError(bodyBytes, apiKey)
 	}
 
 	return result, nil
@@ -186,8 +190,6 @@ func (v *GenericValidator) extractValidationMetadata(bodyBytes []byte, result *m
 		return
 	}
 
-	result.Extra = make(map[string]interface{})
-
 	if mfv.BalancePath != "" {
 		bal := extractJSONPath(data, mfv.BalancePath)
 		if mfv.BalanceSubtractPath != "" {
@@ -199,22 +201,37 @@ func (v *GenericValidator) extractValidationMetadata(bodyBytes []byte, result *m
 	}
 
 	if mfv.QuotaPath != "" {
+		if result.Extra == nil {
+			result.Extra = make(map[string]interface{})
+		}
 		result.Extra["quota"] = extractJSONPath(data, mfv.QuotaPath)
 	}
 
 	if mfv.CreditsPath != "" {
+		if result.Extra == nil {
+			result.Extra = make(map[string]interface{})
+		}
 		result.Extra["credits"] = extractJSONPath(data, mfv.CreditsPath)
 	}
 
 	if mfv.VIPLevelPath != "" {
+		if result.Extra == nil {
+			result.Extra = make(map[string]interface{})
+		}
 		result.Extra["vip_level"] = extractJSONPath(data, mfv.VIPLevelPath)
 	}
 
 	if mfv.TeamNamePath != "" {
+		if result.Extra == nil {
+			result.Extra = make(map[string]interface{})
+		}
 		result.Extra["team_name"] = extractJSONPath(data, mfv.TeamNamePath)
 	}
 
 	if mfv.UsernamePath != "" {
+		if result.Extra == nil {
+			result.Extra = make(map[string]interface{})
+		}
 		result.Extra["username"] = extractJSONPath(data, mfv.UsernamePath)
 	}
 
@@ -307,7 +324,7 @@ func (v *GenericValidator) fetchChainMetadata(ctx context.Context, apiKey string
 		}
 
 		if resp.StatusCode != 200 {
-			result.ErrorMessage = "Metadata error: " + utils.ParseAPIError(respBytes)
+			result.ErrorMessage = "Metadata error: " + utils.ParseAPIError(respBytes, apiKey)
 			return
 		}
 
