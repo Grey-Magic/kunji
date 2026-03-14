@@ -1,6 +1,6 @@
 # Kunji - Complete Usage Guide
 
-Kunji is a CLI tool that validates API keys across 100+ services. This guide covers everything you need to know.
+Kunji is a CLI tool that validates API keys across 258 services. This guide covers everything you need to know.
 
 ---
 
@@ -74,6 +74,9 @@ Kunji auto-detects providers using:
 ./kunji validate -k "gsk_..."          # Groq
 ./kunji validate -k "github_pat_..."   # GitHub
 ./kunji validate -k "sk_live_..."      # Stripe
+./kunji validate -k "sk_test_..."      # Stripe (test)
+./kunji validate -k "vercel_..."       # Vercel
+./kunji validate -k "dop_v1_..."        # DigitalOcean
 ```
 
 ### Composite Keys (ID:Secret)
@@ -169,17 +172,20 @@ Limit detection to specific categories:
 
 ---
 
-## LLM Providers (Foundation)
+## LLM Providers (24 Providers)
 
 ### OpenAI
 ```bash
 ./kunji validate -k "sk-proj-..."
-# Also: sk-... , sk1-..., sk2-...
+./kunji validate -k "sk-svcacct-..."
+./kunji validate -k "sk-ant-..."
+./kunji validate -k "sk-..."  # Legacy format
 ```
 
 ### Anthropic (Claude)
 ```bash
 ./kunji validate -k "sk-ant-api03-..."
+./kunji validate -k "anthropic-..."
 ```
 
 ### Google Gemini
@@ -192,15 +198,25 @@ Limit detection to specific categories:
 ./kunji validate -k "xai-..."
 ```
 
-### Mistral
+### DeepSeek
 ```bash
-./kunji validate -k "..."
-# Prefix: starts with letter, no specific prefix
+./kunji validate -k "sk-deepseek-..."
 ```
 
----
+### Mistral
+```bash
+./kunji validate -k "mistral-..."
+```
 
-## LLM Providers (Inference APIs)
+### Cohere
+```bash
+./kunji validate -k "cohere-..."
+```
+
+### Perplexity
+```bash
+./kunji validate -k "pplx-..."
+```
 
 ### Groq
 ```bash
@@ -209,8 +225,7 @@ Limit detection to specific categories:
 
 ### Together AI
 ```bash
-./kunji validate -k "..."
-# Prefix: tock_ or general
+./kunji validate -k "together-..."
 ```
 
 ### Fireworks AI
@@ -218,10 +233,19 @@ Limit detection to specific categories:
 ./kunji validate -k "fw_..."
 ```
 
+### HuggingFace
+```bash
+./kunji validate -k "hf_..."
+```
+
+### OpenRouter
+```bash
+./kunji validate -k "sk-or-..."
+```
+
 ### Novita AI
 ```bash
-./kunji validate -k "..."
-# Prefix: novita_
+./kunji validate -k "novita-..."
 ```
 
 ### Replicate
@@ -229,218 +253,511 @@ Limit detection to specific categories:
 ./kunji validate -k "r8_..."
 ```
 
----
-
-## LLM Providers (Aggregators)
-
-### OpenRouter
-```bash
-./kunji validate -k "sk-or-..."
-```
-
-### HuggingFace
-```bash
-./kunji validate -k "hf_..."
-```
-
----
-
-## LLM Providers (Regional)
-
-### DeepSeek
-```bash
-./kunji validate -k "sk-..."
-```
-
-### Qwen (Alibaba)
-```bash
-./kunji validate -k "sk-..."
-```
-
-### GLM (Zhipu)
-```bash
-./kunji validate -k "..."
-```
-
-### Kimi (Moonshot)
-```bash
-./kunji validate -k "..."
-```
-
-### MiniMax
-```bash
-./kunji validate -k "..."
-```
-
----
-
-## LLM Providers (Tools)
-
-### Cohere
-```bash
-./kunji validate -k "..."
-# Prefix: cohere_
-```
-
-### Perplexity
-```bash
-./kunji validate -k "pplx-..."
-```
-
 ### ElevenLabs
 ```bash
-./kunji validate -k "..."
-# Prefix: elabs_
-```
-
-### Venice AI
-```bash
-./kunji validate -k "venice_..."
+./kunji validate -k "sk_..."  # Voice AI
 ```
 
 ### Midjourney
 ```bash
-./kunji validate -k "..."
-# Prefix: mj_
+./kunji validate -k "mj-..."
+./kunji validate -k "goapi-..."
+./kunji validate -k "piapi-..."
+```
+
+### Venice AI
+```bash
+./kunji validate -k "venice-..."
+```
+
+### Qwen (Alibaba)
+```bash
+./kunji validate -k "sk-qwen-..."
+./kunji validate -k "sk-dashscope-..."
+```
+
+### Kimi (Moonshot)
+```bash
+./kunji validate -k "sk-kimi-..."
+./kunji validate -k "sk-moonshot-..."
+```
+
+### MiniMax
+```bash
+./kunji validate -k "minimax-..."
+```
+
+### GLM (Zhipu)
+```bash
+./kunji validate -k "..."  # No prefix, check balance
+```
+
+### Cline
+```bash
+./kunji validate -k "cline-..."
+```
+
+### Aider
+```bash
+./kunji validate -k "aider-..."
+```
+
+### Kilo
+```bash
+./kunji validate -k "kilo-..."
 ```
 
 ---
 
-## Security & OSINT
+## Cloud & Infrastructure (New)
 
-### FOFA
+### Vercel
 ```bash
-./kunji validate -k "..."
+./kunji validate -k "vercel_..."
 ```
 
-### ZoomEye
+### Netlify
 ```bash
-./kunji validate -k "..."
+./kunji validate -k "nfp_..."
+./kunji validate -k "nf_..."
 ```
 
-### Netlas
+### Railway
 ```bash
-./kunji validate -k "..."
+./kunji validate -k "railway_..."
 ```
 
-### Intelligence X
+### Fly.io
 ```bash
-./kunji validate -k "..."
+./kunji validate -k "fly_..."
 ```
 
-### VirusTotal
+### Upstash (Redis/Kafka)
 ```bash
-./kunji validate -k "..."
+./kunji validate -k "upstash_..."
 ```
 
-### Censys
+### PlanetScale (MySQL)
 ```bash
-./kunji validate -k "..."
+./kunji validate -k "pscale_..."
 ```
 
-### Shodan
+### Neon (PostgreSQL)
 ```bash
-./kunji validate -k "..."
+./kunji validate -k "neon_..."
 ```
 
----
-
-## Cloud & Hosting
-
-### Cloudflare
+### Turso (SQLite)
 ```bash
-./kunji validate -k "..."
-```
-
-### Heroku
-```bash
-./kunji validate -k "..."
+./kunji validate -k "turso_..."
 ```
 
 ### DigitalOcean
 ```bash
-./kunji validate -k "..."
+./kunji validate -k "dop_v1_..."
 ```
 
-### JumpCloud
+### Cloudflare
 ```bash
-./kunji validate -k "..."
+./kunji validate -k "cloudflare_..."
 ```
 
 ---
 
-## Monetization
+## AI/ML Services (New)
+
+### Pinecone (Vector DB)
+```bash
+./kunji validate -k "pc-..."
+./kunji validate -k "pinecone_..."
+```
+
+### Weaviate
+```bash
+./kunji validate -k "weaviate-..."
+```
+
+### LangSmith
+```bash
+./kunji validate -k "ls-..."
+```
+
+### Langfuse
+```bash
+./kunji validate -k "lf-..."
+```
+
+### Weights & Biases
+```bash
+./kunji validate -k "wandb_..."
+```
+
+---
+
+## Security & Auth (New)
+
+### Auth0
+```bash
+./kunji validate -k "auth0_..."
+```
+
+### Clerk
+```bash
+./kunji validate -k "clerk_..."
+```
+
+### Doppler
+```bash
+./kunji validate -k "dp-..."
+```
+
+---
+
+## Communication (New)
+
+### Discord Bot
+```bash
+./kunji validate -k "Bot ..."  # Bot token
+```
+
+### Resend
+```bash
+./kunji validate -k "re_..."
+```
+
+### Postmark
+```bash
+./kunji validate -k "PM-..."
+```
+
+### Loops
+```bash
+./kunji validate -k "loop-..."
+```
+
+### Novu
+```bash
+./kunji validate -k "novu_..."
+```
+
+### Stream
+```bash
+./kunji validate -k "stream-..."
+```
+
+---
+
+## Payments (Updated)
 
 ### Stripe
 ```bash
-./kunji validate -k "sk_live_..."
-# Also: sk_test_..., rk_live_...
+./kunji validate -k "sk_live_..."   # Live
+./kunji validate -k "sk_test_..."   # Test (NEW)
 ```
 
 ### PayPal
 ```bash
-./kunji validate -k "..."
+./kunji validate -k "..."  # Composite key format
 ```
 
 ### Square
 ```bash
-./kunji validate -k "..."
+./kunji validate -k "..."  # Composite key format
+```
+
+### LemonSqueezy
+```bash
+./kunji validate -k "api_key_..."
+```
+
+### Paddle
+```bash
+./kunji validate -k "paddle_..."
+```
+
+### Plaid
+```bash
+./kunji validate -k "plaid-..."
+```
+
+### Chargebee
+```bash
+./kunji validate -k "chargebee_..."
 ```
 
 ---
 
-## Developers
+## DevOps (New)
+
+### GitLab CI
+```bash
+./kunji validate -k "glcbt-..."
+```
+
+### Pulumi
+```bash
+./kunji validate -k "pul-..."
+```
+
+### Terraform Cloud
+```bash
+./kunji validate -k "tfe-..."
+```
+
+### Spacelift
+```bash
+./kunji validate -k "spacelift_..."
+```
+
+---
+
+## Monitoring (Updated)
+
+### Sentry
+```bash
+./kunji validate -k "sntrys_..."
+```
+
+### PostHog
+```bash
+./kunji validate -k "phc_..."
+```
+
+### Highlight.io
+```bash
+./kunji validate -k "highlight_..."
+```
+
+### Better Stack
+```bash
+./kunji validate -k "better-stack_..."
+```
+
+### Checkly
+```bash
+./kunji validate -k "checkly_..."
+```
+
+### DataDog
+```bash
+./kunji validate -k "DD_API_..."
+./kunji validate -k "DD_APP_..."
+```
+
+---
+
+## Database (New)
+
+### MongoDB Atlas
+```bash
+./kunji validate -k "mongodb+srv://..."  # Connection string
+```
+
+### Redis Cloud
+```bash
+./kunji validate -k "redis-..."
+```
+
+### ClickHouse
+```bash
+./kunji validate -k "clickhouse_..."
+```
+
+### InfluxDB
+```bash
+./kunji validate -k "influxdb_..."
+```
+
+### Cloudflare R2
+```bash
+./kunji validate -k "r2_..."
+```
+
+---
+
+## Productivity (New)
+
+### Linear
+```bash
+./kunji validate -k "lin_api_..."
+```
+
+### Monday
+```bash
+./kunji validate -k "monday_..."
+```
+
+### Airtable
+```bash
+./kunji validate -k "key..."  # Personal token
+./kunji validate -k "pat..."  # Access token
+```
+
+### ClickUp
+```bash
+./kunji validate -k "pk_..."
+```
+
+### Figma
+```bash
+./kunji validate -k "figma_..."
+```
+
+---
+
+## E-commerce & CMS (New)
+
+### Shopify
+```bash
+./kunji validate -k "shpat_..."
+./kunji validate -k "shpss_..."
+```
+
+### Strapi
+```bash
+./kunji validate -k "strapi_..."
+```
+
+### Sanity
+```bash
+./kunji validate -k "sk..."  # Project-specific
+```
+
+### Webflow
+```bash
+./kunji validate -k "wf_..."
+```
+
+---
+
+## Blockchain (New)
+
+### Alchemy
+```bash
+./kunji validate -k "alchemy_..."
+```
+
+### Infura
+```bash
+./kunji validate -k "infura_..."
+```
+
+### QuickNode
+```bash
+./kunji validate -k "qn-..."
+```
+
+### CoinGecko
+```bash
+./kunji validate -k "CG-..."
+```
+
+### Etherscan
+```bash
+./kunji validate -k "etherscan_..."
+```
+
+---
+
+## Testing (New)
+
+### LambdaTest
+```bash
+./kunji validate -k "lambdatest_..."
+```
+
+### Percy
+```bash
+./kunji validate -k "percy_..."
+```
+
+### TestRail
+```bash
+./kunji validate -k "testrail_..."
+```
+
+---
+
+## Deployment (New)
+
+### Koyeb
+```bash
+./kunji validate -k "koyeb_..."
+```
+
+### Coolify
+```bash
+./kunji validate -k "coolify_..."
+```
+
+---
+
+## Search (New)
+
+### Algolia
+```bash
+./kunji validate -k "..."  # Composite: appid:key
+```
+
+### Meilisearch
+```bash
+./kunji validate -k "meilisearch_..."
+```
+
+### Typesense
+```bash
+./kunji validate -k "typesense_..."
+```
+
+---
+
+## Developer Tools (Existing)
 
 ### GitHub
 ```bash
 ./kunji validate -k "ghp_..."
-# Also: github_pat_...
+./kunji validate -k "gho_..."
+./kunji validate -k "ghu_..."
+./kunji validate -k "ghs_..."
+./kunji validate -k "ghr_..."
+./kunji validate -k "github_pat_..."
+```
+
+### GitLab
+```bash
+./kunji validate -k "glpat-..."
 ```
 
 ### NPM
 ```bash
-./kunji validate -k "..."
+./kunji validate -k "npm_..."
 ```
 
 ### Supabase
 ```bash
-./kunji validate -k "eyJ..."
-# JWT format
-```
-
-### CircleCI
-```bash
-./kunji validate -k "..."
+./kunji validate -k "sbp_..."
 ```
 
 ---
 
-## Productivity & Communication
+## Communication (Existing)
 
 ### Slack
 ```bash
 ./kunji validate -k "xoxb-..."
-# Also: xoxp-..., xoxa-...
-```
-
-### Discord
-```bash
-./kunji validate -k "..."
+./kunji validate -k "xoxp-..."
+./kunji validate -k "xoxa-..."
+./kunji validate -k "xoxr-..."
 ```
 
 ### Telegram
 ```bash
-./kunji validate -k "..."
+./kunji validate -k "..."  # Composite: bot_id:token
 ```
 
 ### Twilio
 ```bash
-./kunji validate -k "..."
-```
-
-### Notion
-```bash
-./kunji validate -k "secret_..."
+./kunji validate -k "AC...:..."  # Composite: SID:Token
 ```
 
 ### SendGrid
@@ -448,34 +765,9 @@ Limit detection to specific categories:
 ./kunji validate -k "SG...."
 ```
 
-### Asana
-```bash
-./kunji validate -k "..."
-```
-
 ---
 
-## Analytics & Operations
-
-### DataDog
-```bash
-./kunji validate -k "..."
-```
-
-### PagerDuty
-```bash
-./kunji validate -k "..."
-```
-
-### OpsGenie
-```bash
-./kunji validate -k "..."
-```
-
-### WakaTime
-```bash
-./kunji validate -k "..."
-```
+## Analytics (Existing)
 
 ### Mixpanel
 ```bash
@@ -484,63 +776,10 @@ Limit detection to specific categories:
 
 ### Amplitude
 ```bash
-./kunji validate -k "..."
+./kunji validate -k "..."  # Composite: client:secret
 ```
 
----
-
-## Maps & Data
-
-### Google Maps
-```bash
-./kunji validate -k "AIza..."
-```
-
-### Mapbox
-```bash
-./kunji validate -k "pk...."
-```
-
-### Ipstack
-```bash
-./kunji validate -k "..."
-```
-
-### Bing Maps
-```bash
-./kunji validate -k "..."
-```
-
----
-
-## Miscellaneous SaaS
-
-### Dropbox
-```bash
-./kunji validate -k "..."
-```
-
-### Spotify
-```bash
-./kunji validate -k "..."
-```
-
-### HubSpot
-```bash
-./kunji validate -k "..."
-```
-
-### BrowserStack
-```bash
-./kunji validate -k "..."
-```
-
-### SauceLabs
-```bash
-./kunji validate -k "..."
-```
-
-### Lokalise
+### Pendo
 ```bash
 ./kunji validate -k "..."
 ```
@@ -615,7 +854,7 @@ socks5://user:pass@host:port
 ## View All Supported Providers
 
 ```bash
-# List all 103 supported providers
+# List all 258 supported providers
 ./kunji validate --list
 ```
 
@@ -706,3 +945,14 @@ sk-test-****,openai,false,,,Invalid API key
 ### "Invalid key" but key works
 - Provider may have changed API
 - Try forcing provider: `-p <provider>`
+
+---
+
+## 🔒 Security Note
+
+Kunji handles sensitive API keys. Please observe the following security best practices:
+
+1. **Result File Permissions:** Kunji automatically creates result files with restrictive permissions (`0600` - readable only by your user). Do not change these permissions unless necessary.
+2. **Plaintext Storage:** Validated keys are stored in plaintext within the output files. **Encrypt or securely delete** these files after use.
+3. **SSRF Prevention:** Kunji includes built-in protection to prevent SSRF attacks when using composite keys with custom hosts. It will block requests to local or private IP addresses.
+4. **Error Masking:** Kunji automatically scrubs API keys from error messages captured from providers to prevent accidental leakage in logs and result files.
