@@ -20,8 +20,8 @@
 
 - name: deepseek
   category: llm
-  key_prefixes: ["sk-deepseek-"]
-  key_patterns: ["^sk-deepseek-[a-fA-F0-9]{32}$"]
+  key_prefixes: ["sk-deepseek-", "sk-"]
+  key_patterns: ["^sk-deepseek-[a-zA-Z0-9]{32,}$", "^sk-[a-f0-9]{32}$"]
   validation:
     method: POST
     url: "https://api.deepseek.com/chat/completions"
@@ -163,8 +163,8 @@
 
 - name: openai
   category: llm
-  key_prefixes: ["sk-proj-", "sk-svcacct-", "sk-ant-", "sk-"]
-  key_patterns: ["^sk-proj-[a-zA-Z0-9_-]{20,}$", "^sk-svcacct-[a-zA-Z0-9_-]{20,}$", "^sk-ant-[a-zA-Z0-9_-]{20,}$", "^sk-[a-zA-Z0-9]{32,}$"]
+  key_prefixes: ["sk-proj-", "sk-svcacct-"]
+  key_patterns: ["^sk-proj-[a-zA-Z0-9_-]{20,}$", "^sk-svcacct-[a-zA-Z0-9_-]{20,}$", "^sk-[a-zA-Z0-9]{48}$"]
   validation:
     method: POST
     url: "https://api.openai.com/v1/chat/completions"

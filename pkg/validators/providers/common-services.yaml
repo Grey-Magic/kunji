@@ -15,8 +15,8 @@
 
 - name: stripe
   category: payments
-  key_prefixes: ["sk_live_"]
-  key_patterns: ["(?i)^sk_live_[a-zA-Z0-9]{24,99}$"]
+  key_prefixes: ["sk_live_", "sk_test_"]
+  key_patterns: ["(?i)^sk_(live|test)_[a-zA-Z0-9]{24,99}$"]
   validation:
     method: GET
     url: "https://api.stripe.com/v1/charges?limit=1"
@@ -151,8 +151,8 @@
 
 - name: github
   category: developer
-  key_prefixes: ["ghp_", "gho_", "ghu_", "ghs_", "ghr_", "github_pat_"]
-  key_patterns: ["^(gh[pousr]_[a-zA-Z0-9]{36}|github_pat_[a-zA-Z0-9]{22}_[a-zA-Z0-9]{59})$"]
+  key_prefixes: ["ghp_", "gho_", "ghu_", "ghs_", "ghr_", "github_pat_", "ghcr_"]
+  key_patterns: ["^(gh[pousr]_[a-zA-Z0-9]{36}|github_pat_[a-zA-Z0-9]{22}_[a-zA-Z0-9]{59}|ghcr_[a-zA-Z0-9]{36})$"]
   validation:
     method: GET
     url: "https://api.github.com/user"
@@ -169,8 +169,12 @@
     method: GET
     url: "https://api.twilio.com/2010-04-01/Accounts/{{key.client_id}}.json"
     auth: "basic_composite"
-    metadata_from_validation:
-      name_path: "friendly_name"
+  metadata:
+    - method: GET
+      url: "https://api.twilio.com/2010-04-01/Accounts/{{key.client_id}}/Balance.json"
+      auth: "basic_composite"
+      extract: "balance"
+      store_as: "balance"
 
 - name: heroku
   category: infrastructure
@@ -514,7 +518,7 @@
     method: POST
     url: "https://safebrowsing.googleapis.com/v4/threatMatches:find?key={{key}}"
     auth: "none"
-    body: '{"client":{"clientId":"kunji","clientVersion":"1.0.3"},"threatInfo":{"threatTypes":["MALWARE","SOCIAL_ENGINEERING"],"platformTypes":["ANY_PLATFORM"],"threatEntryTypes":["URL"],"threatEntries":[{"url":"http://example.com"}]}}'
+    body: '{"client":{"clientId":"kunji","clientVersion":"1.0.4"},"threatInfo":{"threatTypes":["MALWARE","SOCIAL_ENGINEERING"],"platformTypes":["ANY_PLATFORM"],"threatEntryTypes":["URL"],"threatEntries":[{"url":"http://example.com"}]}}'
   metadata_from_validation:
     name_path: "matches"
 
@@ -724,7 +728,7 @@
 
 - name: shodan
   category: security
-  key_patterns: ["^[a-zA-Z0-9]{32}$"]
+  key_patterns: ["^[a-f0-9]{32}$"]
   validation:
     method: GET
     url: "https://api.shodan.io/account/profile"
@@ -795,11 +799,10 @@
   key_patterns: ["^key-[a-f0-9]{48}$"]
   validation:
     method: GET
-    url: "https://api.mailgun.net/v3/domains"
+    url: "https://api.mailgun.net/v4/domains"
     auth: "basic_composite"
-    # Basic auth translates to 'api:key-xxxxxx'
-    metadata_from_validation:
-      name_path: "items.0.name"
+  metadata_from_validation:
+    name_path: "items.0.name"
 
 - name: newrelic_personal
   category: monitoring
@@ -909,7 +912,7 @@
 
 - name: zendesk_apikey
   category: api
-  key_patterns: ["^[a-zA-Z0-9]{40}$"]
+  key_patterns: ["^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}/token:[a-zA-Z0-9]{40}$"]
   validation:
     method: GET
     url: "https://{{key.client_id}}.zendesk.com/api/v2/users.json"
@@ -1003,7 +1006,7 @@
 - name: gitlab
   category: developer
   key_prefixes: ["glpat-"]
-  key_patterns: ["^glpat-[a-zA-Z0-9_-]{20}$", "^[a-zA-Z0-9_-]{20}$"]
+  key_patterns: ["^glpat-[a-zA-Z0-9_-]{20}$"]
   validation:
     method: GET
     url: "https://gitlab.com/api/v4/user"
@@ -1023,7 +1026,7 @@
 
 - name: freshdesk
   category: api
-  key_patterns: ["^[a-zA-Z0-9]{20}$"]
+  key_patterns: ["^[a-zA-Z0-9.-]+:[a-zA-Z0-9]{20}$"]
   validation:
     method: GET
     url: "https://{{key.client_id}}.freshdesk.com/api/v2/tickets"
@@ -1250,7 +1253,8 @@
 
 - name: digitalocean
   category: cloud
-  key_patterns: ["^[a-zA-Z0-9_-]{64}$"]
+  key_prefixes: ["dop_v1_"]
+  key_patterns: ["^dop_v1_[a-f0-9]{64}$"]
   validation:
     method: GET
     url: "https://api.digitalocean.com/v2/account"
@@ -1261,7 +1265,7 @@
 
 - name: virustotal
   category: security
-  key_patterns: ["^[a-f0-9]{32}$"]
+  key_patterns: ["^[a-f0-9]{64}$", "^[a-f0-9]{32}$"]
   validation:
     method: GET
     url: "https://www.virustotal.com/api/v3/users"
@@ -1312,3 +1316,1248 @@
     auth: "query:token"
   metadata_from_validation:
     name_path: "status"
+- name: vercel
+  category: cloud
+  key_prefixes: ["vercel_"]
+  key_patterns: ["^vercel_[a-zA-Z0-9]{24,}$"]
+  validation:
+    method: GET
+    url: "https://api.vercel.com/v6/user"
+    auth: "bearer"
+  metadata_from_validation:
+    name_path: "name"
+    email_path: "email"
+
+- name: netlify
+  category: cloud
+  key_prefixes: ["nfp_", "nf_"]
+  key_patterns: ["^(nfp_|nf_)[a-zA-Z0-9_-]{20,}$"]
+  validation:
+    method: GET
+    url: "https://api.netlify.com/api/v1/user"
+    auth: "bearer"
+  metadata_from_validation:
+    name_path: "full_name"
+    email_path: "email"
+
+- name: railway
+  category: cloud
+  key_prefixes: ["railway_"]
+  key_patterns: ["^railway_[a-zA-Z0-9_-]{30,}$"]
+  validation:
+    method: POST
+    url: "https://backboard.railway.com/graphql/v2"
+    auth: "bearer"
+    headers:
+      Content-Type: "application/json"
+    body: '{"query":"{ me { name email } }"}'
+
+- name: flyio
+  category: cloud
+  key_prefixes: ["fly_"]
+  key_patterns: ["^fly_[a-zA-Z0-9_-]{30,}$"]
+  validation:
+    method: GET
+    url: "https://api.fly.io/v1/orgs"
+    auth: "bearer"
+  metadata_from_validation:
+    name_path: "0.name"
+
+- name: upstash
+  category: database
+  key_prefixes: ["upstash_"]
+  key_patterns: ["^upstash_[a-zA-Z0-9_-]{20,}$"]
+  validation:
+    method: GET
+    url: "https://api.upstash.com/v1/me"
+    auth: "bearer"
+  metadata_from_validation:
+    name_path: "name"
+    email_path: "email"
+
+- name: planetscale
+  category: database
+  key_prefixes: ["pscale_"]
+  key_patterns: ["^pscale_[a-zA-Z0-9_-]{30,}$"]
+  validation:
+    method: GET
+    url: "https://api.planetscale.com/v1/organizations"
+    auth: "bearer"
+  metadata_from_validation:
+    name_path: "data.0.name"
+
+- name: neon
+  category: database
+  key_prefixes: ["neon_"]
+  key_patterns: ["^neon_[a-zA-Z0-9_-]{30,}$"]
+  validation:
+    method: POST
+    url: "https://console.neon.tech/api/v2/projects"
+    auth: "bearer"
+  metadata_from_validation:
+    name_path: "projects.0.name"
+
+- name: turso
+  category: database
+  key_prefixes: ["turso_"]
+  key_patterns: ["^turso_[a-zA-Z0-9_-]{30,}$"]
+  validation:
+    method: GET
+    url: "https://api.turso.io/v1/organizations"
+    auth: "bearer"
+  metadata_from_validation:
+    name_path: "organizations.0.name"
+
+# AI/ML Services
+- name: pinecone
+  category: ai
+  key_prefixes: ["pc-", "pinecone_"]
+  key_patterns: ["^pc-[a-z0-9-]{36}$", "^pinecone_[a-zA-Z0-9_-]{30,}$"]
+  validation:
+    method: GET
+    url: "https://api.pinecone.io/actions/whoami"
+    auth: "bearer"
+  metadata_from_validation:
+    name_path: "name"
+
+- name: weaviate
+  category: ai
+  key_prefixes: []
+  key_patterns: ["^[a-zA-Z0-9-]+:weaviate-[a-zA-Z0-9_-]{20,}$"]
+  validation:
+    method: GET
+    url: "https://{{key.client_id}}.weaviate.cloud/v1/schema"
+    auth: "bearer"
+
+- name: langsmith
+  category: ai
+  key_prefixes: ["ls-"]
+  key_patterns: ["^ls-[a-zA-Z0-9_-]{20,}$"]
+  validation:
+    method: GET
+    url: "https://api.smith.langchain.com/user_info"
+    auth: "bearer"
+  metadata_from_validation:
+    name_path: "name"
+
+- name: langfuse
+  category: ai
+  key_prefixes: ["lf-"]
+  key_patterns: ["^lf-[a-zA-Z0-9_-]{20,}$"]
+  validation:
+    method: GET
+    url: "https://api.langfuse.com/api/public/project"
+    auth: "bearer"
+  metadata_from_validation:
+    name_path: "data.0.name"
+
+- name: weights_and_biases
+  category: ai
+  key_prefixes: ["wandb_", "wb-"]
+  key_patterns: ["^wandb_[a-zA-Z0-9_-]{20,}$"]
+  validation:
+    method: GET
+    url: "https://api.wandb.ai/entity"
+    auth: "bearer"
+  metadata_from_validation:
+    name_path: "name"
+
+# Security & Auth
+- name: auth0
+  category: security
+  key_prefixes: []
+  key_patterns: ["^[a-zA-Z0-9-]+:auth0[a-zA-Z0-9_-]{30,}$"]
+  validation:
+    method: GET
+    url: "https://{{key.client_id}}.auth0.com/userinfo"
+    auth: "bearer"
+
+- name: clerk
+  category: security
+  key_prefixes: ["clerk_"]
+  key_patterns: ["^clerk_[a-zA-Z0-9_-]{30,}$"]
+  validation:
+    method: GET
+    url: "https://api.clerk.com/v1/users"
+    auth: "bearer"
+  metadata_from_validation:
+    name_path: "data.0.email_address"
+
+- name: doppler
+  category: security
+  key_prefixes: ["dp-"]
+  key_patterns: ["^dp\\.[a-zA-Z0-9_-]{20,}$"]
+  validation:
+    method: GET
+    url: "https://api.doppler.com/v3/me"
+    auth: "bearer"
+  metadata_from_validation:
+    name_path: "workplace"
+
+# Communication
+- name: discord_bot
+  category: communication
+  key_prefixes: ["Bot "]
+  key_patterns: ["^Bot[a-zA-Z0-9._-]{60,}$"]
+  validation:
+    method: GET
+    url: "https://discord.com/api/v10/users/@me"
+    auth: "bearer"
+  metadata_from_validation:
+    name_path: "username"
+    email_path: "email"
+
+- name: resend
+  category: email
+  key_prefixes: ["re_"]
+  key_patterns: ["^re_[a-zA-Z0-9_-]{20,}$"]
+  validation:
+    method: GET
+    url: "https://api.resend.com/emails"
+    auth: "bearer"
+  metadata_from_validation:
+    name_path: "data.0.from"
+
+- name: postmark
+  category: email
+  key_prefixes: ["PM-"]
+  key_patterns: ["^PM-[a-f0-9]{32}$"]
+  validation:
+    method: GET
+    url: "https://api.postmarkapp.com/client-description"
+    auth: "header:X-Postmark-API-Key"
+
+- name: loops
+  category: email
+  key_prefixes: ["loop-"]
+  key_patterns: ["^loop-[a-zA-Z0-9_-]{20,}$"]
+  validation:
+    method: GET
+    url: "https://api.loops.so/api/v1/contacts"
+    auth: "bearer"
+  metadata_from_validation:
+    name_path: "data.0.email"
+
+- name: novu
+  category: communication
+  key_prefixes: ["novu_"]
+  key_patterns: ["^novu_[a-zA-Z0-9_-]{20,}$"]
+  validation:
+    method: GET
+    url: "https://api.novu.co/v1/workflows"
+    auth: "bearer"
+  metadata_from_validation:
+    name_path: "data.0.name"
+
+- name: stream
+  category: communication
+  key_prefixes: ["stream-"]
+  key_patterns: ["^stream-[a-zA-Z0-9_-]{20,}$"]
+  validation:
+    method: GET
+    url: "https://api.getstream.io/api/v1.0/user/"
+    auth: "bearer"
+  metadata_from_validation:
+    name_path: "id"
+
+# Payments
+- name: lemonsqueezy
+  category: payments
+  key_prefixes: ["api_key_"]
+  key_patterns: ["^api_key_[a-zA-Z0-9_-]{20,}$"]
+  validation:
+    method: GET
+    url: "https://api.lemonsqueezy.com/v1/products"
+    auth: "bearer"
+  metadata_from_validation:
+    name_path: "data.0.attributes.name"
+
+- name: paddle
+  category: payments
+  key_prefixes: ["paddle_"]
+  key_patterns: ["^paddle_[a-zA-Z0-9_-]{20,}$"]
+  validation:
+    method: GET
+    url: "https://api.paddle.com/subscriptions"
+    auth: "bearer"
+  metadata_from_validation:
+    name_path: "data.0.customer_id"
+
+- name: plaid
+  category: payments
+  key_prefixes: ["plaid-"]
+  key_patterns: ["^plaid-[a-zA-Z0-9_-]{20,}$"]
+  validation:
+    method: POST
+    url: "https://sandbox.plaid.com/institutions/get_by_id"
+    auth: "bearer"
+    body: '{"institution_id":"ins_1","country_codes":["US"]}'
+  metadata_from_validation:
+    name_path: "institution.name"
+
+- name: chargebee
+  category: payments
+  key_prefixes: []
+  key_patterns: ["^[a-zA-Z0-9.-]+:chargebee_[a-zA-Z0-9_-]+$"]
+  validation:
+    method: GET
+    url: "https://{{key.client_id}}.chargebee.com/api/v2/subscriptions"
+    auth: "basic"
+
+# DevOps
+- name: gitlab_ci
+  category: devops
+  key_prefixes: ["glcbt-"]
+  key_patterns: ["^glcbt-[a-zA-Z0-9_-]{20,}$"]
+  validation:
+    method: GET
+    url: "https://gitlab.com/api/v4/user"
+    auth: "header:PRIVATE-TOKEN"
+  metadata_from_validation:
+    name_path: "name"
+    email_path: "email"
+
+- name: pulumi
+  category: devops
+  key_prefixes: ["pul-"]
+  key_patterns: ["^pul-[a-zA-Z0-9_-]{20,}$"]
+  validation:
+    method: GET
+    url: "https://api.pulumi.com/api/user"
+    auth: "bearer"
+  metadata_from_validation:
+    name_path: "name"
+
+- name: terraform_cloud
+  category: devops
+  key_prefixes: ["tfe-"]
+  key_patterns: ["^tfe[a-zA-Z0-9_-]{20,}$"]
+  validation:
+    method: GET
+    url: "https://app.terraform.io/api/v2/organizations"
+    auth: "header:X-Terraform-Token"
+  metadata_from_validation:
+    name_path: "data.0.attributes.name"
+
+- name: spacelift
+  category: devops
+  key_prefixes: ["spacelift_"]
+  key_patterns: ["^spacelift_[a-zA-Z0-9_-]{20,}$"]
+  validation:
+    method: GET
+    url: "https://api.spacelift.io/v1/me"
+    auth: "bearer"
+  metadata_from_validation:
+    name_path: "email"
+
+# Monitoring
+- name: sentry
+  category: monitoring
+  key_prefixes: ["sntrys_"]
+  key_patterns: ["^sntrys_[a-zA-Z0-9_-]{30,}$"]
+  validation:
+    method: GET
+    url: "https://sentry.io/api/0/auth/"
+    auth: "bearer"
+  metadata_from_validation:
+    name_path: "user.name"
+
+- name: posthog
+  category: monitoring
+  key_prefixes: ["phc_"]
+  key_patterns: ["^phc_[a-zA-Z0-9_-]{20,}$"]
+  validation:
+    method: GET
+    url: "https://app.posthog.com/api/users/@me"
+    auth: "bearer"
+  metadata_from_validation:
+    name_path: "email"
+
+- name: highlight
+  category: monitoring
+  key_prefixes: ["highlight_"]
+  key_patterns: ["^highlight_[a-zA-Z0-9_-]{20,}$"]
+  validation:
+    method: GET
+    url: "https://api.highlight.io/api/v1/sessions"
+    auth: "bearer"
+  metadata_from_validation:
+    name_path: "data.0.project_id"
+
+- name: betterstack
+  category: monitoring
+  key_prefixes: ["better-stack_"]
+  key_patterns: ["^better-stack[a-zA-Z0-9_-]{20,}$"]
+  validation:
+    method: GET
+    url: "https://api.betterstack.com/v2/source"
+    auth: "bearer"
+  metadata_from_validation:
+    name_path: "data.0.name"
+
+- name: checkly
+  category: monitoring
+  key_prefixes: ["checkly_"]
+  key_patterns: ["^checkly_[a-zA-Z0-9_-]{20,}$"]
+  validation:
+    method: GET
+    url: "https://api.checklyhq.com/v1/checks"
+    auth: "bearer"
+  metadata_from_validation:
+    name_path: "data.0.name"
+
+# Database
+- name: mongodb_atlas
+  category: database
+  key_prefixes: []
+  key_patterns: ["^[a-z]{8}:[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$"]
+  validation:
+    method: GET
+    url: "https://cloud.mongodb.com/api/atlas/v1.0/groups"
+    auth: "basic_composite"
+  metadata_from_validation:
+    name_path: "results.0.name"
+    quota_path: "totalCount"
+
+- name: redis_cloud
+  category: database
+  key_prefixes: ["redis-"]
+  key_patterns: ["^redis-[a-zA-Z0-9_-]{20,}$"]
+  validation:
+    method: GET
+    url: "https://api.rediscloud.com/v2/subscriptions"
+    auth: "bearer"
+  metadata_from_validation:
+    name_path: "data.0.name"
+
+- name: clickhouse
+  category: database
+  key_prefixes: []
+  key_patterns: ["^[a-zA-Z0-9.-]+:clickhouse_[a-zA-Z0-9_-]+$"]
+  validation:
+    method: GET
+    url: "https://{{key.client_id}}.clickhouse.cloud/api/v2/clusters"
+    auth: "bearer"
+
+- name: influxdb
+  category: database
+  key_prefixes: ["influxdb_"]
+  key_patterns: ["^influxdb[a-zA-Z0-9_-]{20,}$"]
+  validation:
+    method: GET
+    url: "https://us-west-2-1.aws.cloud2.influxdata.com/api/v2/buckets"
+    auth: "bearer"
+  metadata_from_validation:
+    name_path: "buckets.0.name"
+
+- name: cloudflare_r2
+  category: storage
+  key_prefixes: []
+  key_patterns: ["^[a-zA-Z0-9-]+:r2_[a-zA-Z0-9_-]{20,}$"]
+  validation:
+    method: GET
+    url: "https://{{key.client_id}}.r2.cloudflarestorage.com"
+    auth: "bearer"
+
+# Productivity
+- name: linear
+  category: productivity
+  key_prefixes: ["lin_api_"]
+  key_patterns: ["^lin_api_[a-zA-Z0-9_-]{20,}$"]
+  validation:
+    method: GET
+    url: "https://api.linear.app/graphql"
+    auth: "bearer"
+    headers:
+      Content-Type: "application/json"
+    body: '{"query":"{ viewer { name email } }"}'
+  metadata_from_validation:
+    name_path: "data.viewer.name"
+    email_path: "data.viewer.email"
+
+- name: monday
+  category: productivity
+  key_prefixes: ["monday_"]
+  key_patterns: ["^monday_[a-zA-Z0-9_-]{20,}$"]
+  validation:
+    method: POST
+    url: "https://api.monday.com/v2"
+    auth: "bearer"
+    body: '{"query":"{ me { name email } }"}'
+  metadata_from_validation:
+    name_path: "data.me.name"
+
+- name: airtable
+  category: productivity
+  key_prefixes: ["key", "pat"]
+  key_patterns: ["^key[a-zA-Z0-9_-]{14}$", "^pat[a-zA-Z0-9_-]{14}$"]
+  validation:
+    method: GET
+    url: "https://api.airtable.com/v0/meta/bases"
+    auth: "bearer"
+  metadata_from_validation:
+    name_path: "bases.0.name"
+
+- name: clickup
+  category: productivity
+  key_prefixes: ["pk_"]
+  key_patterns: ["^pk_[a-zA-Z0-9_-]{20,}$"]
+  validation:
+    method: GET
+    url: "https://api.clickup.com/api/v2/user"
+    auth: "bearer"
+  metadata_from_validation:
+    name_path: "email"
+
+- name: figma
+  category: productivity
+  key_prefixes: ["figma_"]
+  key_patterns: ["^figma_[a-zA-Z0-9_-]{20,}$"]
+  validation:
+    method: GET
+    url: "https://api.figma.com/v1/me"
+    auth: "bearer"
+  metadata_from_validation:
+    name_path: "email"
+
+# E-commerce & CMS
+- name: shopify
+  category: ecommerce
+  key_prefixes: []
+  key_patterns: ["^[a-zA-Z0-9.-]+:(shpat_|shpss_)[a-f0-9]{32}$"]
+  validation:
+    method: GET
+    url: "https://{{key.client_id}}.myshopify.com/admin/api/2024-01/shop.json"
+    auth: "bearer"
+  metadata_from_validation:
+    name_path: "shop.name"
+    email_path: "shop.email"
+
+- name: contentful_token
+  category: cms
+  key_prefixes: ["CFPAT-"]
+  key_patterns: ["^CFPAT-[a-zA-Z0-9_-]{20,}$"]
+  validation:
+    method: GET
+    url: "https://api.contentful.com/spaces"
+    auth: "bearer"
+  metadata_from_validation:
+    name_path: "items.0.name"
+
+- name: strapi
+  category: cms
+  key_prefixes: []
+  key_patterns: ["^[a-zA-Z0-9.-]+:strapi_[a-zA-Z0-9_-]+$"]
+  validation:
+    method: GET
+    url: "https://{{key.client_id}}.strapi.io/api/content-types"
+    auth: "bearer"
+
+- name: sanity
+  category: cms
+  key_prefixes: []
+  key_patterns: ["^[a-zA-Z0-9-]+:sk[a-zA-Z0-9_-]{20,}$"]
+  validation:
+    method: GET
+    url: "https://{{key.client_id}}.api.sanity.io/v2021-10-01/users/me"
+    auth: "bearer"
+  metadata_from_validation:
+    name_path: "name"
+    email_path: "email"
+
+- name: webflow
+  category: cms
+  key_prefixes: ["wf_"]
+  key_patterns: ["^wf_[a-zA-Z0-9_-]{20,}$"]
+  validation:
+    method: GET
+    url: "https://api.webflow.com/sites"
+    auth: "bearer"
+  metadata_from_validation:
+    name_path: "sites.0.name"
+
+# Blockchain
+- name: alchemy
+  category: blockchain
+  key_prefixes: []
+  key_patterns: ["^[a-zA-Z0-9.-]+:alchemy_[a-zA-Z0-9_-]+$"]
+  validation:
+    method: GET
+    url: "https://{{key.client_id}}.alchemy.com/api/v2/transactions"
+    auth: "bearer"
+
+- name: infura
+  category: blockchain
+  key_prefixes: []
+  key_patterns: ["^[a-zA-Z0-9.-]+:infura[a-zA-Z0-9_-]+$"]
+  validation:
+    method: GET
+    url: "https://{{key.client_id}}.infura.io/v3/project_info"
+    auth: "basic"
+
+- name: quicknode
+  category: blockchain
+  key_prefixes: ["qn-"]
+  key_patterns: ["^qn-[a-zA-Z0-9_-]{20,}$"]
+  validation:
+    method: GET
+    url: "https://api.quicknode.com/chains"
+    auth: "bearer"
+  metadata_from_validation:
+    name_path: "chains.0.name"
+
+- name: coingecko
+  category: blockchain
+  key_prefixes: ["CG-"]
+  key_patterns: ["^CG-[a-zA-Z0-9_-]{20,}$"]
+  validation:
+    method: GET
+    url: "https://api.coingecko.com/api/v3/ping"
+    auth: "query:api_key"
+
+- name: etherscan
+  category: blockchain
+  key_prefixes: ["etherscan_"]
+  key_patterns: ["^etherscan_[a-zA-Z0-9_-]{20,}$"]
+  validation:
+    method: GET
+    url: "https://api.etherscan.io/api?module=account&action=balance"
+    auth: "query:apikey"
+
+# Testing
+- name: lambdatest
+  category: testing
+  key_prefixes: ["lambdatest_"]
+  key_patterns: ["^lambdatest_[a-zA-Z0-9_-]{20,}$"]
+  validation:
+    method: GET
+    url: "https://api.lambdatest.com/automation/api/v1/user"
+    auth: "bearer"
+  metadata_from_validation:
+    name_path: "email"
+
+- name: percy
+  category: testing
+  key_prefixes: ["percy_"]
+  key_patterns: ["^percy_[a-zA-Z0-9_-]{20,}$"]
+  validation:
+    method: GET
+    url: "https://percy.io/api/v1/projects"
+    auth: "bearer"
+  metadata_from_validation:
+    name_path: "data.0.name"
+
+- name: testrail
+  category: testing
+  key_prefixes: []
+  key_patterns: ["^[a-zA-Z0-9.-]+:testrail_[a-zA-Z0-9_-]+$"]
+  validation:
+    method: GET
+    url: "https://{{key.client_id}}.testrail.io/index.php?/api/v2/get_user"
+    auth: "basic"
+
+# Deployment
+- name: koyeb
+  category: deployment
+  key_prefixes: ["koyeb_"]
+  key_patterns: ["^koyeb_[a-zA-Z0-9_-]{20,}$"]
+  validation:
+    method: GET
+    url: "https://app.koyeb.com/v1/apps"
+    auth: "bearer"
+  metadata_from_validation:
+    name_path: "apps.0.name"
+
+- name: coolify
+  category: deployment
+  key_prefixes: []
+  key_patterns: ["^[a-zA-Z0-9.-]+:coolify_[a-zA-Z0-9_-]+$"]
+  validation:
+    method: GET
+    url: "https://{{key.client_id}}/api/v1/projects"
+    auth: "bearer"
+  metadata_from_validation:
+    name_path: "data.0.name"
+
+# Search
+- name: algolia_search
+  category: search
+  key_prefixes: ["algolia_"]
+  key_patterns: ["^algolia[a-zA-Z0-9_-]{20,}:[a-zA-Z0-9_-]{20,}$"]
+  validation:
+    method: GET
+    url: "https://{{key.client_id}}.algolia.net/1/indexes"
+    auth: "header:X-Algolia-API-Key"
+  metadata_from_validation:
+    name_path: "items.0.name"
+
+- name: meilisearch
+  category: search
+  key_prefixes: []
+  key_patterns: ["^[a-zA-Z0-9.-]+:meilisearch_[a-zA-Z0-9_-]+$"]
+  validation:
+    method: GET
+    url: "https://{{key.client_id}}.mssw.dev/indexes"
+    auth: "header:X-Meilisearch-Key"
+  metadata_from_validation:
+    name_path: "results.0.name"
+
+- name: typesense
+  category: search
+  key_prefixes: []
+  key_patterns: ["^[a-zA-Z0-9.-]+:typesense_[a-zA-Z0-9_-]+$"]
+  validation:
+    method: GET
+    url: "https://{{key.client_id}}.typesense.net/debug"
+    auth: "header:x-typesense-api-key"
+
+# Feature Flags
+- name: launchdarkly
+  category: feature_flags
+  key_prefixes: ["ld-"]
+  key_patterns: ["^ld-[a-zA-Z0-9_-]{20,}$"]
+  validation:
+    method: GET
+    url: "https://app.launchdarkly.com/api/v2/projects"
+    auth: "bearer"
+  metadata_from_validation:
+    name_path: "items.0.name"
+
+- name: statsig
+  category: feature_flags
+  key_prefixes: ["statsig-"]
+  key_patterns: ["^statsig-[a-zA-Z0-9_-]{20,}$"]
+  validation:
+    method: GET
+    url: "https://api.statsig.com/v1/projects"
+    auth: "bearer"
+  metadata_from_validation:
+    name_path: "0.name"
+
+- name: flagsmith
+  category: feature_flags
+  key_prefixes: []
+  key_patterns: ["^[a-zA-Z0-9.-]+:flagsmith_[a-zA-Z0-9_-]+$"]
+  validation:
+    method: GET
+    url: "https://{{key.client_id}}/api/v1/projects"
+    auth: "bearer"
+
+- name: unleash
+  category: feature_flags
+  key_prefixes: []
+  key_patterns: ["^[a-zA-Z0-9.-]+:unleash_[a-zA-Z0-9_-]+$"]
+  validation:
+    method: GET
+    url: "https://{{key.client_id}}.unleash-hosted.com/api/admin/projects"
+    auth: "bearer"
+
+# Security & SAST/DAST
+- name: sonarqube
+  category: security
+  key_prefixes: ["squ_"]
+  key_patterns: ["^squ_[a-f0-9]{40}$"]
+  validation:
+    method: GET
+    url: "https://sonarqube.com/api/user_tokens/search"
+    auth: "bearer"
+
+- name: semgrep
+  category: security
+  key_prefixes: ["semgrep_"]
+  key_patterns: ["^semgrep_[a-zA-Z0-9_-]{20,}$"]
+  validation:
+    method: GET
+    url: "https://semgrep.dev/api/v1/deployments"
+    auth: "bearer"
+  metadata_from_validation:
+    name_path: "0.name"
+
+- name: socket
+  category: security
+  key_prefixes: ["socket_"]
+  key_patterns: ["^socket_[a-zA-Z0-9_-]{20,}$"]
+  validation:
+    method: GET
+    url: "https://api.socket.dev/v1/repos"
+    auth: "bearer"
+
+- name: veracode
+  category: security
+  key_prefixes: ["veracode_"]
+  key_patterns: ["^veracode_[a-zA-Z0-9_-]{20,}$"]
+  validation:
+    method: GET
+    url: "https://api.veracode.com/api/authn/v2/api-keys"
+    auth: "bearer"
+
+- name: checkmarx
+  category: security
+  key_prefixes: []
+  key_patterns: ["^[a-zA-Z0-9.-]+:cx_[a-zA-Z0-9_-]+$"]
+  validation:
+    method: GET
+    url: "https://{{key.client_id}}.checkmarx.net/cxrestapi/auth/validate"
+    auth: "bearer"
+
+# CMS & Headless
+- name: storyblok
+  category: cms
+  key_prefixes: ["storyblok_"]
+  key_patterns: ["^storyblok_[a-zA-Z0-9_-]{20,}$"]
+  validation:
+    method: GET
+    url: "https://api.storyblok.com/v1/spaces"
+    auth: "bearer"
+  metadata_from_validation:
+    name_path: "spaces.0.name"
+
+- name: datocms
+  category: cms
+  key_prefixes: ["datocms-"]
+  key_patterns: ["^datocms-[a-zA-Z0-9_-]{20,}$"]
+  validation:
+    method: GET
+    url: "https://api.datocms.com/v2/me"
+    auth: "bearer"
+  metadata_from_validation:
+    name_path: "email"
+
+- name: prismic
+  category: cms
+  key_prefixes: []
+  key_patterns: ["^[a-zA-Z0-9.-]+:MC5-[a-zA-Z0-9_-]+$"]
+  validation:
+    method: GET
+    url: "https://{{key.client_id}}.prismic.io/api/v2"
+    auth: "bearer"
+
+# Search
+- name: swiftype
+  category: search
+  key_prefixes: ["engine-"]
+  key_patterns: ["^engine-[a-zA-Z0-9_-]{20,}$"]
+  validation:
+    method: GET
+    url: "https://api.swiftype.com/api/v1/engines"
+    auth: "bearer"
+
+# Web3
+- name: moralis
+  category: web3
+  key_prefixes: ["moralis_"]
+  key_patterns: ["^moralis_[a-zA-Z0-9_-]{20,}$"]
+  validation:
+    method: GET
+    url: "https://deep-index.moralis.io/api/v2/nft/0x0000000000000000000000000000000000000000"
+    auth: "header:X-Moralis-Api-Key"
+
+- name: thirdweb
+  category: web3
+  key_prefixes: ["thirdweb_"]
+  key_patterns: ["^thirdweb_[a-zA-Z0-9_-]{20,}$"]
+  validation:
+    method: GET
+    url: "https://api.thirdweb.com/v1/contracts"
+    auth: "bearer"
+
+- name: tenderly
+  category: web3
+  key_prefixes: ["tenderly_"]
+  key_patterns: ["^tenderly_[a-zA-Z0-9_-]{20,}$"]
+  validation:
+    method: GET
+    url: "https://api.tenderly.co/api/v1/account"
+    auth: "bearer"
+  metadata_from_validation:
+    name_path: "username"
+
+# Monitoring
+- name: logrocket
+  category: monitoring
+  key_prefixes: ["logrocket_"]
+  key_patterns: ["^logrocket_[a-zA-Z0-9_-]{20,}$"]
+  validation:
+    method: GET
+    url: "https://api.logrocket.com/v1/sessions"
+    auth: "bearer"
+
+- name: uptimerobot
+  category: monitoring
+  key_prefixes: ["ur"]
+  key_patterns: ["^ur[a-zA-Z0-9_-]{20,}$"]
+  validation:
+    method: POST
+    url: "https://api.uptimerobot.com/v2/getMonitors"
+    auth: "body"
+    headers:
+      Content-Type: "application/json"
+    body: '{"api_key":"{{key}}","format":"json"}'
+
+# API Gateway
+- name: kong
+  category: api_gateway
+  key_prefixes: []
+  key_patterns: ["^[a-zA-Z0-9.-]+:kong_[a-zA-Z0-9_-]+$"]
+  validation:
+    method: GET
+    url: "https://{{key.client_id}}/v1/consumers"
+    auth: "bearer"
+
+- name: tyk
+  category: api_gateway
+  key_prefixes: []
+  key_patterns: ["^[a-zA-Z0-9.-]+:tyk_[a-zA-Z0-9_-]+$"]
+  validation:
+    method: GET
+    url: "https://{{key.client_id}}/api/apis"
+    auth: "bearer"
+
+# Documentation
+- name: confluence
+  category: documentation
+  key_prefixes: []
+  key_patterns: ["^[a-zA-Z0-9.-]+:confluence_[a-zA-Z0-9_-]+$"]
+  validation:
+    method: GET
+    url: "https://{{key.client_id}}.atlassian.net/wiki/rest/api/user"
+    auth: "bearer"
+
+- name: miro
+  category: collaboration
+  key_prefixes: ["miro_"]
+  key_patterns: ["^miro_[a-zA-Z0-9_-]{20,}$"]
+  validation:
+    method: GET
+    url: "https://api.miro.com/v2/boards"
+    auth: "bearer"
+
+# E-commerce
+- name: woocommerce
+  category: ecommerce
+  key_prefixes: []
+  key_patterns: ["^[a-zA-Z0-9.-]+:(ck_|cs_)[a-f0-9]{32}$"]
+  validation:
+    method: GET
+    url: "https://{{key.client_id}}/wp-json/wc/v3/system_status"
+    auth: "basic"
+
+- name: bigcommerce
+  category: ecommerce
+  key_prefixes: ["bc_"]
+  key_patterns: ["^bc_[a-zA-Z0-9_-]{20,}$"]
+  validation:
+    method: GET
+    url: "https://api.bigcommerce.com/v3/store"
+    auth: "bearer"
+
+# Secrets Management
+- name: bitwarden
+  category: secrets
+  key_prefixes: ["bw_"]
+  key_patterns: ["^bw_[a-zA-Z0-9_-]{20,}$"]
+  validation:
+    method: GET
+    url: "https://api.bitwarden.com/v1/api-keys"
+    auth: "bearer"
+
+- name: onepassword
+  category: secrets
+  key_prefixes: []
+  key_patterns: ["^[a-zA-Z0-9.-]+:op_[a-zA-Z0-9_-]+$"]
+  validation:
+    method: GET
+    url: "https://{{key.client_id}}/v1/vaults"
+    auth: "bearer"
+
+# Container Registry
+- name: docker_hub
+  category: container
+  key_prefixes: ["dckr_pat_"]
+  key_patterns: ["^dckr_pat_[a-zA-Z0-9_-]{20,}$"]
+  validation:
+    method: GET
+    url: "https://hub.docker.com/v2/user"
+    auth: "bearer"
+
+# Databases
+- name: cockroachdb
+  category: database
+  key_prefixes: ["crdb_"]
+  key_patterns: ["^crdb_[a-zA-Z0-9_-]{20,}$"]
+  validation:
+    method: GET
+    url: "https://cockroachdb.cloud/api/v1/clusters"
+    auth: "bearer"
+
+- name: tidb
+  category: database
+  key_prefixes: ["tidb_"]
+  key_patterns: ["^tidb_[a-zA-Z0-9_-]{20,}$"]
+  validation:
+    method: GET
+    url: "https://api.tidbcloud.com/v1beta/clusters"
+    auth: "bearer"
+
+- name: yugabyte
+  category: database
+  key_prefixes: ["yb-"]
+  key_patterns: ["^yb-[a-zA-Z0-9_-]{20,}$"]
+  validation:
+    method: GET
+    url: "https://api.yugabyte.com/v1/clusters"
+    auth: "bearer"
+
+- name: timescaledb
+  category: database
+  key_prefixes: ["tsdb-"]
+  key_patterns: ["^tsdb-[a-zA-Z0-9_-]{20,}$"]
+  validation:
+    method: GET
+    url: "https://console.timescale.cloud/api/v1/services"
+    auth: "bearer"
+
+# IAC & DevOps
+- name: env0
+  category: iac
+  key_prefixes: ["env0_"]
+  key_patterns: ["^env0_[a-zA-Z0-9_-]{20,}$"]
+  validation:
+    method: GET
+    url: "https://api.env0.com/v1/organizations"
+    auth: "bearer"
+
+- name: scalr
+  category: iac
+  key_prefixes: ["scalr_"]
+  key_patterns: ["^scalr_[a-zA-Z0-9_-]{20,}$"]
+  validation:
+    method: GET
+    url: "https://scalr.io/api/iacp/v3/accounts"
+    auth: "bearer"
+
+- name: checkov
+  category: security
+  key_prefixes: ["checkov_"]
+  key_patterns: ["^checkov_[a-zA-Z0-9_-]{20,}$"]
+  validation:
+    method: GET
+    url: "https://api.bridgecrew.io/v1/validate"
+    auth: "bearer"
+
+# CI/CD
+- name: argo_cd
+  category: cicd
+  key_prefixes: []
+  key_patterns: ["^[a-zA-Z0-9.-]+:argocd_[a-zA-Z0-9_-]+$"]
+  validation:
+    method: GET
+    url: "https://{{key.client_id}}/api/v1/session"
+    auth: "bearer"
+
+# Testing
+- name: testingbot
+  category: testing
+  key_prefixes: ["testingbot_"]
+  key_patterns: ["^testingbot_[a-zA-Z0-9_-]{20,}$"]
+  validation:
+    method: GET
+    url: "https://api.testingbot.com/v1/user"
+    auth: "bearer"
+
+- name: chromatic
+  category: testing
+  key_prefixes: ["chromatic_"]
+  key_patterns: ["^chromatic_[a-zA-Z0-9_-]{20,}$"]
+  validation:
+    method: GET
+    url: "https://www.chromatic.com/api/v1/projects"
+    auth: "bearer"
+
+# Collaboration
+- name: height
+  category: collaboration
+  key_prefixes: ["height_"]
+  key_patterns: ["^height_[a-zA-Z0-9_-]{20,}$"]
+  validation:
+    method: GET
+    url: "https://api.height.app/v1/users/me"
+    auth: "bearer"
+
+- name: shortcut
+  category: collaboration
+  key_prefixes: ["sc_"]
+  key_patterns: ["^sc_[a-zA-Z0-9_-]{20,}$"]
+  validation:
+    method: GET
+    url: "https://api.shortcutapp.com/api/v3/members"
+    auth: "bearer"
+
+# Communication
+- name: knock
+  category: communication
+  key_prefixes: ["knock_"]
+  key_patterns: ["^knock_[a-zA-Z0-9_-]{20,}$"]
+  validation:
+    method: GET
+    url: "https://api.knock.app/v1/users"
+    auth: "bearer"
+
+# Auth & Identity
+- name: workos
+  category: auth
+  key_prefixes: ["workos_"]
+  key_patterns: ["^workos_[a-zA-Z0-9_-]{20,}$"]
+  validation:
+    method: GET
+    url: "https://api.workos.com/v1/directory_users"
+    auth: "bearer"
+
+- name: stytch
+  category: auth
+  key_prefixes: ["stytch_"]
+  key_patterns: ["^stytch_[a-zA-Z0-9_-]{20,}$"]
+  validation:
+    method: GET
+    url: "https://api.stytch.com/v1/projects"
+    auth: "bearer"
+
+- name: frontegg
+  category: auth
+  key_prefixes: []
+  key_patterns: ["^[a-zA-Z0-9.-]+:frontegg_[a-zA-Z0-9_-]+$"]
+  validation:
+    method: GET
+    url: "https://{{key.client_id}}.frontegg.com/identity/resources/users/v1"
+    auth: "bearer"
+
+- name: fusionauth
+  category: auth
+  key_prefixes: []
+  key_patterns: ["^[a-zA-Z0-9.-]+:fusionauth_[a-zA-Z0-9_-]+$"]
+  validation:
+    method: GET
+    url: "https://{{key.client_id}}/api/user"
+    auth: "bearer"
+
+# Modern Cloud & Serverless
+- name: render
+  category: cloud
+  key_prefixes: ["rnd_"]
+  key_patterns: ["^rnd_[a-zA-Z0-9_-]{20,}$"]
+  validation:
+    method: GET
+    url: "https://api.render.com/v1/services"
+    auth: "bearer"
+
+- name: northflank
+  category: cloud
+  key_prefixes: ["nf-"]
+  key_patterns: ["^nf-[a-zA-Z0-9_-]{20,}$"]
+  validation:
+    method: GET
+    url: "https://api.northflank.com/v1/projects"
+    auth: "bearer"
+
+- name: qoddi
+  category: cloud
+  key_prefixes: ["qoddi_"]
+  key_patterns: ["^qoddi_[a-zA-Z0-9_-]{20,}$"]
+  validation:
+    method: GET
+    url: "https://api.qoddi.com/v1/apps"
+    auth: "bearer"
+
+- name: easypanel
+  category: cloud
+  key_prefixes: []
+  key_patterns: ["^[a-zA-Z0-9.-]+:easypanel_[a-zA-Z0-9_-]+$"]
+  validation:
+    method: GET
+    url: "https://{{key.client_id}}/api/v1/projects"
+    auth: "bearer"
+
+- name: dokku
+  category: cloud
+  key_prefixes: []
+  key_patterns: ["^[a-zA-Z0-9.-]+:dokku_[a-zA-Z0-9_-]+$"]
+  validation:
+    method: GET
+    url: "https://{{key.client_id}}/api/v1/projects"
+    auth: "bearer"
+
+- name: caprover
+  category: cloud
+  key_prefixes: []
+  key_patterns: ["^[a-zA-Z0-9.-]+:caprover_[a-zA-Z0-9_-]+$"]
+  validation:
+    method: GET
+    url: "https://{{key.client_id}}/api/v1/projects"
+    auth: "bearer"
+
+# Modern AI/ML
+- name: chroma
+  category: ai_ml
+  key_prefixes: []
+  key_patterns: ["^[a-zA-Z0-9.-]+:chroma_[a-zA-Z0-9_-]+$"]
+  validation:
+    method: GET
+    url: "https://{{key.client_id}}.cloud.chroma.io/api/v1/heartbeat"
+    auth: "bearer"
+
+- name: comet
+  category: ai_ml
+  key_prefixes: ["comet_"]
+  key_patterns: ["^comet_[a-zA-Z0-9_-]{20,}$"]
+  validation:
+    method: GET
+    url: "https://www.comet.com/api/rest/v2/ws"
+    auth: "bearer"
+
+- name: evidently
+  category: ai_ml
+  key_prefixes: ["evidently_"]
+  key_patterns: ["^evidently_[a-zA-Z0-9_-]{20,}$"]
+  validation:
+    method: GET
+    url: "https://api.evidently.ai/api/v1/projects"
+    auth: "bearer"
+
+- name: helicone
+  category: ai_ml
+  key_prefixes: ["helicone_"]
+  key_patterns: ["^helicone-[a-zA-Z0-9_-]{20,}$"]
+  validation:
+    method: GET
+    url: "https://api.helicone.ai/v1/user"
+    auth: "bearer"
+
+- name: braintrust
+  category: ai_ml
+  key_prefixes: ["bt-"]
+  key_patterns: ["^bt-[a-zA-Z0-9_-]{20,}$"]
+  validation:
+    method: GET
+    url: "https://api.braintrustdata.com/v1/project"
+    auth: "bearer"
+
+- name: traceloop
+  category: ai_ml
+  key_prefixes: ["traceloop-"]
+  key_patterns: ["^traceloop-[a-zA-Z0-9_-]{20,}$"]
+  validation:
+    method: GET
+    url: "https://api.traceloop.com/v1/projects"
+    auth: "bearer"
+
+- name: arize
+  category: ai_ml
+  key_prefixes: ["arize-"]
+  key_patterns: ["^arize-[a-zA-Z0-9_-]{20,}$"]
+  validation:
+    method: POST
+    url: "https://graphql.arize.com/graphql"
+    auth: "bearer"
+    headers:
+      Content-Type: "application/json"
+    body: '{"query":"{ __schema { types { name } } }"}'
