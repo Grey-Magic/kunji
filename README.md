@@ -5,14 +5,14 @@
 **A fast, concurrent CLI tool for validating API keys.**
 
 ![Go](https://img.shields.io/badge/Go-1.21%2B-00ADD8?style=flat-square&logo=go)
-![Version](https://img.shields.io/badge/Version-1.0.2-blue?style=flat-square)
+VERSION-badge-1.0.4
 ![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey?style=flat-square)
 
 </div>
 
 ---
 
-Kunji validates API keys concurrently across dozens of services. It auto-detects the provider, checks key validity, extracts account metadata where supported, and exports results in multiple formats.
+Kunji validates API keys concurrently across 260+ services. It auto-detects the provider, checks key validity, extracts account metadata where supported, and exports results in multiple formats.
 
 > **Note:** For detailed usage examples for each provider, see [USAGE.md](./USAGE.md)
 
@@ -46,7 +46,7 @@ sudo mv kunji /usr/local/bin/
 **Prebuilt binary:**
 
 ```bash
-curl -sL https://github.com/Grey-Magic/kunji/releases/latest/download/kunji_1.0.2.zip -o kunji.zip
+curl -sL https://github.com/Grey-Magic/kunji/releases/latest/download/kunji_1.0.4.zip -o kunji.zip
 unzip kunji.zip
 chmod +x kunji
 sudo mv kunji /usr/local/bin/
@@ -97,24 +97,23 @@ kunji validate -f server_logs.txt -c llm
 | `--resume` | — | `false` | Skip keys already in the output file |
 | `--list` | `-l` | — | List all supported providers |
 
-## Supported Providers (103)
+## Supported Providers (260+)
 
 | Category | Providers |
 |---|---|
-| **Foundation** | OpenAI, Anthropic, Google Gemini, xAI (Grok), Mistral |
+| **Foundation** | OpenAI, Anthropic, Google Gemini, xAI (Grok), Mistral, DeepSeek |
 | **Inference APIs** | Groq, Together AI, Fireworks AI, Novita AI, Replicate |
-| **Aggregators** | OpenRouter, HuggingFace |
-| **Regional** | DeepSeek, Qwen, GLM (Zhipu), Kimi (Moonshot), MiniMax |
-| **Tools** | Cohere, Perplexity, ElevenLabs, Venice AI, Midjourney |
-| **AI Coding Proxies** | Kilo, Cline, RooCode, Aider |
-| **Cloud & Hosting** | Cloudflare, Heroku, JumpCloud, DigitalOcean |
-| **Security & OSINT** | FOFA, ZoomEye, Netlas, Intelligence X, VirusTotal, Censys, Shodan |
-| **Monetization** | Stripe, PayPal, Square |
-| **Developers** | GitHub, NPM, Supabase, CircleCI |
-| **Productivity/Comm** | Notion, Slack, Twilio, SendGrid, Telegram, Asana, Discord |
-| **Analytics/Ops** | DataDog, OpsGenie, PagerDuty, WakaTime, Mixpanel, Amplitude |
-| **Maps & Data** | Google Maps, Ipstack, Mapbox, Bing Maps |
-| **Misc SaaS** | Dropbox, Lokalise, SauceLabs, HubSpot, BrowserStack, Spotify |
+| **AI Coding & Tools** | Kilo, Cline, RooCode, Aider, Cohere, Perplexity, ElevenLabs |
+| **Cloud & Hosting** | Cloudflare, Vercel, Netlify, Railway, Fly.io, DigitalOcean, Heroku, Render |
+| **Databases** | MongoDB Atlas, Redis Cloud, ClickHouse, CockroachDB, TiDB, InfluxDB, Neon, Turso, PlanetScale |
+| **Security & OSINT** | Shodan, VirusTotal, Censys, FOFA, ZoomEye, Netlas, Intelligence X |
+| **Auth & Identity** | Auth0, Clerk, WorkOS, Stytch, Frontegg, FusionAuth |
+| **Developers & DevOps** | GitHub, GitLab, NPM, Supabase, CircleCI, Travis CI, Pulumi, Spacelift |
+| **Productivity & Comm** | Notion, Slack, Twilio, SendGrid, Telegram, Asana, Discord, Resend, Postmark |
+| **Monitoring & Ops** | DataDog, Sentry, PostHog, Better Stack, LogRocket, OpsGenie, PagerDuty |
+| **Payments** | Stripe, PayPal, Square, LemonSqueezy, Paddle, Plaid, Chargebee |
+| **CMS & E-commerce** | Shopify, WooCommerce, Strapi, Sanity, Contentful, Webflow, Storyblok |
+| **Blockchain** | Alchemy, Infura, QuickNode, Etherscan, Moralis, Thirdweb |
 
 ## Adding a Provider
 
