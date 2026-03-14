@@ -97,21 +97,47 @@ func listProviders() {
 		return providers[i].Name < providers[j].Name
 	})
 
-	pterm.Println(pterm.Cyan("Supported Providers ("))
-	fmt.Printf("%d", len(providers))
-	pterm.Cyan("):")
+	pterm.DefaultHeader.WithFullWidth().WithBackgroundStyle(pterm.NewStyle(pterm.BgLightMagenta)).WithTextStyle(pterm.NewStyle(pterm.FgBlack)).Println("Supported Providers")
 	pterm.Println()
 
-	for _, p := range providers {
-		prefixes := ""
-		if len(p.KeyPrefixes) > 0 {
-			prefixes = p.KeyPrefixes[0]
-			if len(p.KeyPrefixes) > 1 {
-				prefixes += fmt.Sprintf(" (+%d)", len(p.KeyPrefixes)-1)
-			}
-		}
-		pterm.Printf("  %s %s\n", pterm.LightCyan(p.Name), pterm.Gray(prefixes))
+	tableData := pterm.TableData{
+		{"Provider", "Category", "Prefixes", "Provider", "Category", "Prefixes"},
 	}
+
+	for i := 0; i < len(providers); i += 2 {
+		p1 := providers[i]
+		row := []string{
+			pterm.LightCyan(p1.Name),
+			pterm.Gray(p1.Category),
+			pterm.LightYellow(getPrefixes(p1)),
+		}
+
+		if i+1 < len(providers) {
+			p2 := providers[i+1]
+			row = append(row,
+				pterm.LightCyan(p2.Name),
+				pterm.Gray(p2.Category),
+				pterm.LightYellow(getPrefixes(p2)),
+			)
+		} else {
+			row = append(row, "", "", "")
+		}
+		tableData = append(tableData, row)
+	}
+
+	pterm.DefaultTable.WithHasHeader().WithBoxed().WithData(tableData).Render()
+	pterm.Info.Printfln("Total supported providers: %d", len(providers))
+}
+
+func getPrefixes(p validators.ProviderInfo) string {
+	if len(p.KeyPrefixes) == 0 {
+		return "-"
+	}
+	res := p.KeyPrefixes[0]
+	if len(p.KeyPrefixes) > 1 {
+		res += fmt.Sprintf(" (+%d)", len(p.KeyPrefixes)-1)
+	}
+	return res
 }
 
 func init() {
