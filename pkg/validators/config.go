@@ -116,14 +116,20 @@ type PatternEntry struct {
 	Category string
 }
 
-func BuildDetectionIndex(configs []ProviderConfig) ([]PrefixEntry, []PatternEntry) {
+type PrefixIndex map[string][]PrefixEntry
+
+func BuildDetectionIndex(configs []ProviderConfig) ([]PrefixEntry, []PatternEntry, PrefixIndex) {
 	var prefixes []PrefixEntry
 	var patterns []PatternEntry
+	prefixMap := make(PrefixIndex)
 
 	for _, cfg := range configs {
 		for _, p := range cfg.KeyPrefixes {
 			if p != "" {
-				prefixes = append(prefixes, PrefixEntry{Prefix: p, Provider: cfg.Name, Category: cfg.Category})
+				entry := PrefixEntry{Prefix: p, Provider: cfg.Name, Category: cfg.Category}
+				prefixes = append(prefixes, entry)
+				firstChar := string(p[0])
+				prefixMap[firstChar] = append(prefixMap[firstChar], entry)
 			}
 		}
 		for _, p := range cfg.KeyPatterns {
@@ -138,7 +144,12 @@ func BuildDetectionIndex(configs []ProviderConfig) ([]PrefixEntry, []PatternEntr
 
 	sortPrefixesByLength(prefixes)
 	sortPatternsBySpecificity(patterns)
-	return prefixes, patterns
+
+	for _, entries := range prefixMap {
+		sortPrefixesByLength(entries)
+	}
+
+	return prefixes, patterns, prefixMap
 }
 
 func sortPrefixesByLength(entries []PrefixEntry) {
@@ -167,12 +178,17 @@ func DetectProviderFromIndex(key string, prefixes []PrefixEntry, patterns []Patt
 	}
 
 	var matches []match
-	for _, p := range prefixes {
-		if manualCategory != "" && p.Category != manualCategory {
-			continue
-		}
-		if strings.HasPrefix(key, p.Prefix) {
-			matches = append(matches, match{provider: p.Provider, prefix: p.Prefix, length: len(p.Prefix)})
+	if len(key) > 0 {
+		for _, p := range prefixes {
+			if len(p.Prefix) > 0 && p.Prefix[0] != key[0] {
+				continue
+			}
+			if manualCategory != "" && p.Category != manualCategory {
+				continue
+			}
+			if strings.HasPrefix(key, p.Prefix) {
+				matches = append(matches, match{provider: p.Provider, prefix: p.Prefix, length: len(p.Prefix)})
+			}
 		}
 	}
 
@@ -359,12 +375,17 @@ func DetectProviderWithSuggestion(key string, prefixes []PrefixEntry, patterns [
 	}
 
 	var matches []match
-	for _, p := range prefixes {
-		if manualCategory != "" && p.Category != manualCategory {
-			continue
-		}
-		if strings.HasPrefix(key, p.Prefix) {
-			matches = append(matches, match{provider: p.Provider, prefix: p.Prefix, length: len(p.Prefix)})
+	if len(key) > 0 {
+		for _, p := range prefixes {
+			if len(p.Prefix) > 0 && p.Prefix[0] != key[0] {
+				continue
+			}
+			if manualCategory != "" && p.Category != manualCategory {
+				continue
+			}
+			if strings.HasPrefix(key, p.Prefix) {
+				matches = append(matches, match{provider: p.Provider, prefix: p.Prefix, length: len(p.Prefix)})
+			}
 		}
 	}
 
