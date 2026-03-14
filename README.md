@@ -5,7 +5,6 @@
 **A fast, concurrent CLI tool for validating API keys.**
 
 ![Go](https://img.shields.io/badge/Go-1.21%2B-00ADD8?style=flat-square&logo=go)
-VERSION-badge-1.0.4
 ![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey?style=flat-square)
 
 </div>
