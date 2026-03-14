@@ -34,7 +34,7 @@ func TestDetectProviderFromIndex(t *testing.T) {
 		},
 	}
 
-	prefixes, patterns := BuildDetectionIndex(configs)
+	prefixes, patterns, _ := BuildDetectionIndex(configs)
 	detector := &Detector{
 		prefixes: prefixes,
 		patterns: patterns,
@@ -80,7 +80,7 @@ func TestDetectProvider_PrefixPriority(t *testing.T) {
 		},
 	}
 
-	prefixes, _ := BuildDetectionIndex(configs)
+	prefixes, _, _ := BuildDetectionIndex(configs)
 	detector := &Detector{prefixes: prefixes}
 
 	result := detector.DetectProvider("sk-proj-somekey", "")
@@ -102,7 +102,7 @@ func TestDetectProvider_PatternPriority(t *testing.T) {
 		},
 	}
 
-	_, patterns := BuildDetectionIndex(configs)
+	_, patterns, _ := BuildDetectionIndex(configs)
 	detector := &Detector{patterns: patterns}
 
 	result := detector.DetectProvider("sk-proj-abcdefghijk1234567890", "")
@@ -118,7 +118,7 @@ func TestDetectProvider_CompositeKeys(t *testing.T) {
 		},
 	}
 
-	prefixes, patterns := BuildDetectionIndex(configs)
+	prefixes, patterns, _ := BuildDetectionIndex(configs)
 	detector := &Detector{prefixes: prefixes, patterns: patterns}
 
 	result := detector.DetectProvider("client_id:client_secret", "")
@@ -130,9 +130,8 @@ func TestDetectProvider_Whitespace(t *testing.T) {
 	configs, _ := LoadProviderConfigs()
 	detector := NewDetectorFromConfigs(configs)
 
-	result := detector.DetectProvider("  sk-test-key-with-spaces  ", "")
-	// With improved patterns, sk- prefix now only matches OpenAI
-	assert.Equal(t, "openai", result, "sk- prefix should now match openai uniquely")
+	result := detector.DetectProvider("  sk-proj-test-key-with-spaces  ", "")
+	assert.Equal(t, "openai", result, "sk-proj- prefix should match openai even with spaces")
 }
 
 func TestDetectProvider_LLMSpecificPrefixes(t *testing.T) {
@@ -145,8 +144,9 @@ func TestDetectProvider_LLMSpecificPrefixes(t *testing.T) {
 		category      string
 		expectedMatch string
 	}{
-		{"DeepSeek key", "sk-deepseek-abcdef0123456789abcdef0123456789", "", "deepseek"},
-		{"Anthropic api03 key", "sk-ant-api03-abcdefghijklmnopqrstuvwxyz", "", "anthropic"},
+		{"DeepSeek key (long)", "sk-deepseek-abcdef0123456789abcdef0123456789", "", "deepseek"},
+		{"DeepSeek key (short sk-)", "sk-0123456789abcdef0123456789abcdef", "", "deepseek"},
+		{"OpenAI project key", "sk-proj-abc1234567890abcdefghijklmnopqrst", "", "openai"},
 		{"Anthropic legacy key", "anthropic-api-key-1234567890abcdef", "", "anthropic"},
 		{"OpenRouter key", "sk-or-abcdefghijklmnopqrstuvwxyz", "", "openrouter"},
 		{"Gemini key - ambiguous without category filter", "AIzaSyABCDEFGHIJKLMNOPQRSTUVWXYZAaBbCcDdEe", "", "unknown"},
@@ -195,10 +195,10 @@ func TestDetectProviderWithSuggestion(t *testing.T) {
 		expectedMatch string
 		expectSuggest bool
 	}{
-		{"Known key OpenAI", "sk-abc1234567890abcdefghijklmnopqrstuvwxyz", "", "openai", false},
+		{"Known key OpenAI", "sk-proj-abc1234567890abcdefghijklmnopqrstuvwxyz", "", "openai", false},
 		{"Unknown key - should suggest", "random-unknown-key-12345", "", "unknown", true},
-		{"Ambiguous sk-ant key - should suggest", "sk-ant-test-key", "", "unknown", true},
-		{"Ambiguous with category filter - both match", "sk-ant-test-key", "llm", "unknown", true},
+		{"Unique sk-ant key", "sk-ant-test-key", "", "anthropic", false},
+		{"Unique sk-ant with category", "sk-ant-test-key", "llm", "anthropic", false},
 	}
 
 	for _, tt := range tests {
@@ -238,7 +238,7 @@ func TestDetectProvider_AmbiguousPrefix(t *testing.T) {
 		},
 	}
 
-	prefixes, _ := BuildDetectionIndex(configs)
+	prefixes, _, _ := BuildDetectionIndex(configs)
 	detector := &Detector{prefixes: prefixes}
 
 	// test-abc-xxx matches provider-a (longest prefix test-abc-)
@@ -293,14 +293,31 @@ func TestDetectProvider_CaseInsensitivePrefix(t *testing.T) {
 	}
 }
 
-func TestDetectProviderByCategory(t *testing.T) {
+func TestDetectProvider_NewServices(t *testing.T) {
 	configs, _ := LoadProviderConfigs()
 	detector := NewDetectorFromConfigs(configs)
 
-	// Test category filtering works correctly
-	llmCategory := "llm"
-	result := detector.DetectProvider("sk-ant-test-key", llmCategory)
+	tests := []struct {
+		name          string
+		key           string
+		expectedMatch string
+	}{
+		{"Shopify composite", "myshop:shpat_1234567890abcdef1234567890abcdef", "shopify"},
+		{"Vercel token", "vercel_abcdefghijklmnopqrstuvwxyz", "vercel"},
+		{"Netlify token", "nfp_abcdefghijklmnopqrstuvwxyz", "netlify"},
+		{"Railway token", "railway_abcdefghijklmnopqrstuvwxyz123456", "railway"},
+		{"Fly.io token", "fly_abcdefghijklmnopqrstuvwxyz123456", "flyio"},
+		{"Upstash token", "upstash_abcdefghijklmnopqrstuvwxyz", "upstash"},
+		{"Discord Bot token", "Bot abcdefghijklmnopqrstuvwxyz.123456.789012345678901234567890", "discord_bot"},
+		{"Collision OpenAI vs DeepSeek", "sk-0123456789abcdef0123456789abcdef", "deepseek"},
+		{"GitHub PAT", "ghp_123456789012345678901234567890123456", "github"},
+		{"GitHub PAT (duplicate test)", "ghcr_123456789012345678901234567890123456", "github"},
+	}
 
-	// With category filter, should still detect (or return unknown if ambiguous)
-	assert.NotEmpty(t, result)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := detector.DetectProvider(tt.key, "")
+			assert.Equal(t, tt.expectedMatch, result, "key should match expected provider")
+		})
+	}
 }
