@@ -1,134 +1,142 @@
 <div align="center">
 
-# Kunji
+<pre style="font-family: monospace; font-size: 16px; line-height: 1.2;">
+<span style="color: rgb(95, 0, 135);">  ██   ██ ██    ██ ███    ██      ██ ██</span>
+<span style="color: rgb(135, 45, 175);">  ██  ██  ██    ██ ████   ██      ██ ██</span>
+<span style="color: rgb(155, 70, 195);">  █████   ██    ██ ██ ██  ██      ██ ██</span>
+<span style="color: rgb(175, 95, 215);">  ██  ██  ██    ██ ██  ██ ██ ██   ██ ██</span>
+<span style="color: rgb(195, 120, 235);">  ██   ██  ██████  ██   ████  █████  ██</span>
+</pre>
 
-**A fast, concurrent CLI tool for validating API keys.**
+**Universal API Key Validation Engine**
 
-![Go](https://img.shields.io/badge/Go-1.21%2B-00ADD8?style=flat-square&logo=go)
-![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey?style=flat-square)
+[![Go](https://img.shields.io/badge/Go-1.21%2B-00ADD8?style=flat-square&logo=go)](https://golang.org)
+[![Version](https://img.shields.io/badge/Version-1.0.4-magenta?style=flat-square)](https://github.com/Grey-Magic/kunji/releases)
+[![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey?style=flat-square)](#installation)
+[![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)](LICENSE)
+
+<p align="center">
+  <a href="#features">Features</a> •
+  <a href="#installation">Installation</a> •
+  <a href="#usage">Usage</a> •
+  <a href="#security">Security</a> •
+  <a href="#supported-providers">Providers</a> •
+  <a href="./USAGE.md">Full Manual</a>
+</p>
 
 </div>
 
 ---
 
-Kunji validates API keys concurrently across 260+ services. It auto-detects the provider, checks key validity, extracts account metadata where supported, and exports results in multiple formats.
+**Kunji** is a high-performance, concurrent CLI tool designed to rapidly validate API keys across 260+ services. Whether you're auditing infrastructure, testing integrations, or cleaning up configuration dumps, Kunji provides a safe, fast, and automated way to verify credentials.
 
-> **Note:** For detailed usage examples for each provider, see [USAGE.md](./USAGE.md)
+## 🚀 Terminal Experience
 
-## Features
+Kunji features a modern, interactive UI built with `pterm`, providing real-time feedback during bulk operations.
 
-- **Auto-Detection** — Identifies providers via prefix trie and regex fallback
-- **Concurrent** — Worker pool with configurable thread count
-- **Metadata Extraction** — Balance, account name, and email for valid keys
-- **Proxy Support** — Single proxy or rotating proxy file
-- **Smart Resume** — Skip already-validated keys on restart
-- **Multiple Exports** — `.txt`, `.csv`, `.json` output formats
-- **Self-Update** — Built-in `kunji update` command
+```text
+  ██   ██ ██    ██ ███    ██      ██ ██
+  ██  ██  ██    ██ ████   ██      ██ ██
+  █████   ██    ██ ██ ██  ██      ██ ██
+  ██  ██  ██    ██ ██  ██ ██ ██   ██ ██
+  ██   ██  ██████  ██   ████  █████  ██
 
-## Installation
+Validating API Keys [256/260] ███████████████████████████████████░ 98%
+  » shopify         ✓ Valid    myshop:shpat_****abc123
+  » openai          ✓ Valid    sk-proj-****xyz789
+  » stripe          ✗ Invalid  sk_live_****123456
+  » deepseek        ✓ Valid    sk-****def456
+```
 
-**Go Install (Recommended):**
+## ✨ Key Features
 
+- 🔍 **Smart Auto-Detection** — Instantly identifies 260+ services via a high-speed prefix trie and sensitive regex fallback.
+- ⚡ **Concurrent Engine** — Multi-threaded worker pool handles thousands of keys in seconds with configurable throughput.
+- 📊 **Metadata Extraction** — Automatically retrieves account balance, email, usage limits, and organization names.
+- 🛡️ **Hardened Security** — Built-in SSRF protection, restrictive file permissions, and automatic secret scrubbing in logs.
+- 🔄 **Smart Resume & Retry** — Skip already-validated keys and handle intermittent network failures or rate limits with jittered backoff.
+- 📤 **Clean Export** — Generate structured reports in `.txt`, `.csv`, or `.json` for easy integration with other tools.
+
+## 📦 Installation
+
+### Go Install (Recommended)
 ```bash
 go install github.com/Grey-Magic/kunji@latest
 ```
 
-**From source:**
-
+### Prebuilt Binaries
+Download the latest release for your platform:
 ```bash
-git clone https://github.com/Grey-Magic/kunji.git
-cd kunji
-go build -o kunji .
-sudo mv kunji /usr/local/bin/
-```
-
-**Prebuilt binary:**
-
-```bash
+# Example for Linux/macOS
 curl -sL https://github.com/Grey-Magic/kunji/releases/latest/download/kunji_1.0.4.zip -o kunji.zip
-unzip kunji.zip
-chmod +x kunji
+unzip kunji.zip && chmod +x kunji
 sudo mv kunji /usr/local/bin/
 ```
 
-**Update:**
+---
 
+## 🛠️ Usage
+
+For a comprehensive guide including service-specific examples, see [**USAGE.md**](./USAGE.md).
+
+### Basic Commands
 ```bash
-# Built-in updater
-kunji update
+# Validate a single key (auto-detects provider)
+kunji validate -k "sk-proj-..."
 
-# Or reinstall
-go install github.com/Grey-Magic/kunji@latest
-```
-
-## Usage
-
-```bash
-# Single key
-kunji validate -k "sk-ant-api03-..."
-
-# Bulk file
+# Bulk validation from a file with 20 workers
 kunji validate -f keys.txt -o results.csv -t 20
 
-# With proxy and resume
-kunji validate -f keys.txt --proxy proxies.txt --resume
+# Resume an interrupted run
+kunji validate -f keys.txt --resume -o results.json
 
-# Force a specific provider (skips Regex detection)
-kunji validate -f stripe_dumps.txt -p stripe
-
-# Limit detection to a specific category
-kunji validate -f server_logs.txt -c llm
+# List all 260+ supported services
+kunji validate --list
 ```
 
-## Flags
-
-| Flag | Short | Default | Description |
-|---|---|---|---|
-| `--key` | `-k` | — | Single API key to validate |
-| `--keys` | `-f` | — | File with one key per line |
-| `--out` | `-o` | `results.txt` | Output file (`.txt`, `.csv`, `.json`) |
-| `--provider` | `-p` | — | Force a specific provider, skip auto-detection |
-| `--category` | `-c` | — | Limit auto-detection to a specific category |
-| `--threads` | `-t` | `10` | Number of concurrent workers |
-| `--proxy` | — | — | Proxy URL or path to proxy list file |
-| `--retries` | `-r` | `3` | Retries on failure or HTTP 429 |
-| `--timeout` | — | `15` | Request timeout in seconds |
-| `--resume` | — | `false` | Skip keys already in the output file |
-| `--list` | `-l` | — | List all supported providers |
-
-## Supported Providers (260+)
-
-| Category | Providers |
+### Advanced Options
+| Flag | Description |
 |---|---|
-| **Foundation** | OpenAI, Anthropic, Google Gemini, xAI (Grok), Mistral, DeepSeek |
-| **Inference APIs** | Groq, Together AI, Fireworks AI, Novita AI, Replicate |
-| **AI Coding & Tools** | Kilo, Cline, RooCode, Aider, Cohere, Perplexity, ElevenLabs |
-| **Cloud & Hosting** | Cloudflare, Vercel, Netlify, Railway, Fly.io, DigitalOcean, Heroku, Render |
-| **Databases** | MongoDB Atlas, Redis Cloud, ClickHouse, CockroachDB, TiDB, InfluxDB, Neon, Turso, PlanetScale |
-| **Security & OSINT** | Shodan, VirusTotal, Censys, FOFA, ZoomEye, Netlas, Intelligence X |
+| `-p, --provider` | Force a specific provider (e.g., `openai`) to skip detection. |
+| `-c, --category` | Limit detection to a category (e.g., `llm`, `payments`). |
+| `--proxy` | Provide a single proxy or a file for automatic rotation. |
+| `--timeout` | Set custom request timeout (default: 15s). |
+
+
+## 🏛️ Supported Providers (260+)
+
+Kunji supports an extensive array of services across multiple domains:
+
+| Category | Top Services |
+|---|---|
+| **Foundation LLMs** | OpenAI, Anthropic, Google Gemini, xAI, Mistral, DeepSeek |
+| **Cloud & Hosting** | Cloudflare, Vercel, Netlify, Railway, DigitalOcean, Heroku, Render |
+| **Databases** | MongoDB Atlas, Redis Cloud, ClickHouse, CockroachDB, TiDB, Neon |
+| **Security & OSINT** | Shodan, VirusTotal, Censys, FOFA, ZoomEye, Intelligence X |
 | **Auth & Identity** | Auth0, Clerk, WorkOS, Stytch, Frontegg, FusionAuth |
-| **Developers & DevOps** | GitHub, GitLab, NPM, Supabase, CircleCI, Travis CI, Pulumi, Spacelift |
-| **Productivity & Comm** | Notion, Slack, Twilio, SendGrid, Telegram, Asana, Discord, Resend, Postmark |
-| **Monitoring & Ops** | DataDog, Sentry, PostHog, Better Stack, LogRocket, OpsGenie, PagerDuty |
-| **Payments** | Stripe, PayPal, Square, LemonSqueezy, Paddle, Plaid, Chargebee |
-| **CMS & E-commerce** | Shopify, WooCommerce, Strapi, Sanity, Contentful, Webflow, Storyblok |
+| **DevOps & CICD** | GitHub, GitLab, NPM, Supabase, CircleCI, Travis CI, Pulumi, ArgoCD |
+| **Payments** | Stripe, PayPal, Square, LemonSqueezy, Paddle, Plaid |
+| **CMS & E-com** | Shopify, WooCommerce, Strapi, Sanity, Contentful, Webflow, Prismic |
 | **Blockchain** | Alchemy, Infura, QuickNode, Etherscan, Moralis, Thirdweb |
 
-## Adding a Provider
+---
 
-All providers are defined in `pkg/validators/providers/llm.yaml` or `common-services.yaml` — no Go code required.
+## 🤝 Contributing
+
+Adding a new provider is simple and requires **zero Go code**. Simply add a YAML entry to `pkg/validators/providers/`:
 
 ```yaml
-- name: myprovider
-  key_prefixes: ["mp-"]
-  key_patterns: ["^mp-[a-zA-Z0-9]{32}$"]
+- name: new_service
+  key_prefixes: ["ns-"]
+  key_patterns: ["^ns-[a-zA-Z0-9]{32}$"]
   validation:
-    method: POST
-    url: "https://api.myprovider.com/v1/chat/completions"
+    method: GET
+    url: "https://api.newservice.com/v1/user"
     auth: "bearer"
-    body: '{"model":"gpt-4o","messages":[{"role":"user","content":"Hi"}],"max_tokens":1}'
 ```
 
-## License
+See [**AGENTS.md**](./AGENTS.md) for full development guidelines.
 
-MIT
+## 📄 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
