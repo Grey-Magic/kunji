@@ -954,5 +954,4 @@ Kunji handles sensitive API keys. Please observe the following security best pra
 
 1. **Result File Permissions:** Kunji automatically creates result files with restrictive permissions (`0600` - readable only by your user). Do not change these permissions unless necessary.
 2. **Plaintext Storage:** Validated keys are stored in plaintext within the output files. **Encrypt or securely delete** these files after use.
-3. **SSRF Prevention:** Kunji includes built-in protection to prevent SSRF attacks when using composite keys with custom hosts. It will block requests to local or private IP addresses.
-4. **Error Masking:** Kunji automatically scrubs API keys from error messages captured from providers to prevent accidental leakage in logs and result files.
+3. **Error Masking:** Kunji automatically scrubs API keys from error messages captured from providers to prevent accidental leakage in logs and result files.
