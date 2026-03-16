@@ -121,22 +121,6 @@ Kunji supports an extensive array of services across multiple domains:
 
 ---
 
-## 🤝 Contributing
-
-Adding a new provider is simple and requires **zero Go code**. Simply add a YAML entry to `pkg/validators/providers/`:
-
-```yaml
-- name: new_service
-  key_prefixes: ["ns-"]
-  key_patterns: ["^ns-[a-zA-Z0-9]{32}$"]
-  validation:
-    method: GET
-    url: "https://api.newservice.com/v1/user"
-    auth: "bearer"
-```
-
-See [**AGENTS.md**](./AGENTS.md) for full development guidelines.
-
 ## 📄 License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
