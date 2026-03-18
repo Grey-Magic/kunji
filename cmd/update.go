@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	currentVersion = "1.0.4"
+	currentVersion = "1.0.5"
 	githubRepo     = "Grey-Magic/kunji"
 )
 
@@ -110,6 +110,67 @@ var updateCmd = &cobra.Command{
 		}
 
 		pterm.Success.Printfln("Updated to version %s successfully!", latestVersion)
+	},
+}
+
+var updateProvidersCmd = &cobra.Command{
+	Use:   "providers",
+	Short: "Update provider definitions from remote source",
+	Run: func(cmd *cobra.Command, args []string) {
+		pterm.Info.Println("Updating provider definitions...")
+
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			pterm.Error.Printfln("Could not determine home directory: %v", err)
+			return
+		}
+
+		provDir := filepath.Join(homeDir, ".kunji", "providers")
+		if err := os.MkdirAll(provDir, 0755); err != nil {
+			pterm.Error.Printfln("Could not create providers directory: %v", err)
+			return
+		}
+
+		files := []string{"llm.yaml", "common-services.yaml"}
+		baseURL := "https://raw.githubusercontent.com/Grey-Magic/kunji/main/pkg/validators/providers/"
+
+		successCount := 0
+		for _, file := range files {
+			pterm.Info.Printfln("Fetching %s...", file)
+			url := baseURL + file
+
+			resp, err := http.Get(url)
+			if err != nil {
+				pterm.Warning.Printfln("Failed to fetch %s: %v", file, err)
+				continue
+			}
+			defer resp.Body.Close()
+
+			if resp.StatusCode != 200 {
+				pterm.Warning.Printfln("Failed to fetch %s: Status %d", file, resp.StatusCode)
+				continue
+			}
+
+			destPath := filepath.Join(provDir, file)
+			out, err := os.Create(destPath)
+			if err != nil {
+				pterm.Warning.Printfln("Failed to create file %s: %v", destPath, err)
+				continue
+			}
+			defer out.Close()
+
+			if _, err := io.Copy(out, resp.Body); err != nil {
+				pterm.Warning.Printfln("Failed to save %s: %v", file, err)
+				continue
+			}
+			successCount++
+		}
+
+		if successCount > 0 {
+			pterm.Success.Printfln("Successfully updated %d provider definitions in %s", successCount, provDir)
+		} else {
+			pterm.Error.Println("Failed to update any provider definitions.")
+		}
 	},
 }
 
@@ -209,4 +270,5 @@ func extractBinaryFromZip(zipPath, destPath string) error {
 
 func init() {
 	rootCmd.AddCommand(updateCmd)
+	updateCmd.AddCommand(updateProvidersCmd)
 }

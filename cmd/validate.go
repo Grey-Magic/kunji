@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/Grey-Magic/kunji/pkg/runner"
 	"github.com/Grey-Magic/kunji/pkg/validators"
@@ -11,17 +12,24 @@ import (
 )
 
 var (
-	singleKey  string
-	keysFile   string
-	outputFile string
-	provider   string
-	category   string
-	threads    int
-	proxy      string
-	retries    int
-	timeout    int
-	resume     bool
-	list       bool
+	singleKey       string
+	keysFile        string
+	outputFile      string
+	provider        string
+	category        string
+	threads         int
+	proxy           string
+	retries         int
+	timeout         int
+	resume          bool
+	list            bool
+	onlyValid       bool
+	minBalance      float64
+	customProviders string
+	dryRun          bool
+	deepScan        bool
+	password        string
+	bench           bool
 )
 
 var validateCmd = &cobra.Command{
@@ -30,6 +38,10 @@ var validateCmd = &cobra.Command{
 	Long:  `A lightning-fast engine for validating API keys individually or in bulk, with built-in proxy rotation and metadata extraction.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		PrintBanner()
+
+		if customProviders != "" {
+			validators.CustomProvidersDir = customProviders
+		}
 
 		if list {
 			listProviders()
@@ -63,13 +75,14 @@ var validateCmd = &cobra.Command{
 			pterm.Warning.Println("Retries capped at 10")
 		}
 
-		pterm.Info.Printfln("Starting validation with %d threads...", threads)
-
-		runr, err := runner.NewRunner(threads, proxy, retries, timeout, outputFile, provider, category, resume)
+		runr, err := runner.NewRunner(threads, proxy, retries, timeout, outputFile, provider, category, resume, onlyValid, minBalance)
 		if err != nil {
 			pterm.Error.Printfln("Error initializing runner: %v", err)
 			return
 		}
+		runr.DeepScan = deepScan
+		runr.Password = password
+		runr.Bench = bench
 
 		keys, err := runr.LoadAndFilterKeys(singleKey, keysFile)
 		if err != nil {
@@ -82,6 +95,20 @@ var validateCmd = &cobra.Command{
 			return
 		}
 
+		if dryRun {
+			pterm.Info.Printfln("Dry Run Mode: Analyzing %d keys...", len(keys))
+			for _, k := range keys {
+				detection := runr.Detector.DetectProviderWithSuggestion(k, category)
+				if detection.Provider != "unknown" {
+					pterm.Success.Printfln("Key: %s... -> Provider: %s", k[:min(len(k), 8)], detection.Provider)
+				} else {
+					pterm.Warning.Printfln("Key: %s... -> Unknown (Suggestions: %v)", k[:min(len(k), 8)], detection.Suggestions)
+				}
+			}
+			return
+		}
+
+		pterm.Info.Printfln("Starting validation with %d threads...", threads)
 		runr.Run(keys)
 	},
 }
@@ -145,7 +172,7 @@ func init() {
 
 	validateCmd.Flags().StringVarP(&singleKey, "key", "k", "", "Single API key to validate")
 	validateCmd.Flags().StringVarP(&keysFile, "keys", "f", "", "File containing multiple API keys (one per line)")
-	validateCmd.Flags().StringVarP(&outputFile, "out", "o", "", "Output file for valid keys/results (can be .txt, .csv, or .json)")
+	validateCmd.Flags().StringVarP(&outputFile, "out", "o", "", "Output file for valid keys/results (can be .txt, .csv, .json, or .jsonl)")
 	validateCmd.Flags().StringVarP(&provider, "provider", "p", "", "Force a specific provider (e.g. 'stripe', 'openai') to bypass regex auto-detection")
 	validateCmd.Flags().StringVarP(&category, "category", "c", "", "Limit regex auto-detection to a specific category (e.g. 'llm', 'payments')")
 	validateCmd.Flags().IntVarP(&threads, "threads", "t", 10, "Number of concurrent validation workers (1-100)")
@@ -154,4 +181,46 @@ func init() {
 	validateCmd.Flags().IntVar(&timeout, "timeout", 15, "Timeout in seconds per validation request (5-120)")
 	validateCmd.Flags().BoolVar(&resume, "resume", false, "Resume from previous checkpoint file")
 	validateCmd.Flags().BoolVarP(&list, "list", "l", false, "List all supported providers")
+
+	validateCmd.Flags().BoolVar(&onlyValid, "only-valid", false, "Only output valid keys to file/console")
+	validateCmd.Flags().Float64Var(&minBalance, "min-balance", 0.0, "Minimum balance required to consider key valid and output it")
+	validateCmd.Flags().StringVar(&customProviders, "custom-providers", "", "Path to directory containing custom provider YAML files")
+	validateCmd.Flags().BoolVar(&dryRun, "dry-run", false, "Detect providers without making network requests")
+	validateCmd.Flags().BoolVar(&deepScan, "deep-scan", false, "Try multiple providers if detection is ambiguous or fails")
+	validateCmd.Flags().StringVar(&password, "password", "", "Password to encrypt output files or decrypt resume files")
+	validateCmd.Flags().BoolVar(&bench, "bench", false, "Run 3 consecutive tests per key to measure average latency")
+
+	validateCmd.RegisterFlagCompletionFunc("provider", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		providers, err := validators.GetAllProviders()
+		if err != nil {
+			return nil, cobra.ShellCompDirectiveError
+		}
+		var names []string
+		for _, p := range providers {
+			if toComplete == "" || strings.HasPrefix(p.Name, toComplete) {
+				names = append(names, p.Name)
+			}
+		}
+		sort.Strings(names)
+		return names, cobra.ShellCompDirectiveNoFileComp
+	})
+
+	validateCmd.RegisterFlagCompletionFunc("category", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		providers, err := validators.GetAllProviders()
+		if err != nil {
+			return nil, cobra.ShellCompDirectiveError
+		}
+		cats := make(map[string]bool)
+		for _, p := range providers {
+			cats[p.Category] = true
+		}
+		var names []string
+		for c := range cats {
+			if toComplete == "" || strings.HasPrefix(c, toComplete) {
+				names = append(names, c)
+			}
+		}
+		sort.Strings(names)
+		return names, cobra.ShellCompDirectiveNoFileComp
+	})
 }
