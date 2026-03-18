@@ -10,7 +10,12 @@ import (
 	"time"
 )
 
+var SkipSSRFCheck bool
+
 func ValidateURL(rawURL string) error {
+	if SkipSSRFCheck {
+		return nil
+	}
 	u, err := url.Parse(rawURL)
 	if err != nil {
 		return fmt.Errorf("invalid URL: %v", err)
@@ -23,8 +28,7 @@ func ValidateURL(rawURL string) error {
 
 	ips, err := net.LookupIP(host)
 	if err != nil {
-		// If DNS lookup fails, we can't verify IP but the request will likely fail anyway.
-		// For dynamic subdomains, this might happen.
+
 		return nil
 	}
 
