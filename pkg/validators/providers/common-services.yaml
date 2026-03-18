@@ -136,7 +136,7 @@
         Authorization: "Bearer {{extract.access_token}}"
       extract: "name"
       store_as: "name"
-      
+
 - name: square
   category: payments
   key_patterns: ["(?i)^sq0[a-z]{3}-[0-9A-Za-z\\-_]{15,45}:[a-zA-Z0-9]{15,65}$"]
@@ -518,7 +518,7 @@
     method: POST
     url: "https://safebrowsing.googleapis.com/v4/threatMatches:find?key={{key}}"
     auth: "none"
-    body: '{"client":{"clientId":"kunji","clientVersion":"1.0.4"},"threatInfo":{"threatTypes":["MALWARE","SOCIAL_ENGINEERING"],"platformTypes":["ANY_PLATFORM"],"threatEntryTypes":["URL"],"threatEntries":[{"url":"http://example.com"}]}}'
+    body: '{"client":{"clientId":"kunji","clientVersion":"1.0.5"},"threatInfo":{"threatTypes":["MALWARE","SOCIAL_ENGINEERING"],"platformTypes":["ANY_PLATFORM"],"threatEntryTypes":["URL"],"threatEntries":[{"url":"http://example.com"}]}}'
   metadata_from_validation:
     name_path: "matches"
 
@@ -917,8 +917,8 @@
     method: GET
     url: "https://{{key.client_id}}.zendesk.com/api/v2/users.json"
     auth: "basic_composite"
-    # Composite key format: user@email/token:API_TOKEN
-    # key.client_id = subdomain, key.secret = email/token:TOKEN
+
+
   metadata:
     - method: GET
       url: "https://{{key.client_id}}.zendesk.com/api/v2/users/me.json"
@@ -938,7 +938,7 @@
     method: GET
     url: "https://{{key.client_id}}.api.mailchimp.com/3.0/"
     auth: "basic_composite"
-    # Composite key format: <datacenter>:<full_api_key>  e.g. us1:abcdef123456-us1
+
     metadata_from_validation:
       name_path: "account_name"
       email_path: "email"
@@ -1031,7 +1031,7 @@
     method: GET
     url: "https://{{key.client_id}}.freshdesk.com/api/v2/tickets"
     auth: "basic_composite"
-    # Composite key format: subdomain:API_KEY
+
   metadata:
     - method: GET
       url: "https://{{key.client_id}}.freshdesk.com/api/v2/agents/me"
@@ -1408,7 +1408,7 @@
   metadata_from_validation:
     name_path: "organizations.0.name"
 
-# AI/ML Services
+
 - name: pinecone
   category: ai
   key_prefixes: ["pc-", "pinecone_"]
@@ -1462,7 +1462,7 @@
   metadata_from_validation:
     name_path: "name"
 
-# Security & Auth
+
 - name: auth0
   category: security
   key_prefixes: []
@@ -1494,7 +1494,7 @@
   metadata_from_validation:
     name_path: "workplace"
 
-# Communication
+
 - name: discord_bot
   category: communication
   key_prefixes: ["Bot "]
@@ -1560,7 +1560,7 @@
   metadata_from_validation:
     name_path: "id"
 
-# Payments
+
 - name: lemonsqueezy
   category: payments
   key_prefixes: ["api_key_"]
@@ -1604,7 +1604,7 @@
     url: "https://{{key.client_id}}.chargebee.com/api/v2/subscriptions"
     auth: "basic"
 
-# DevOps
+
 - name: gitlab_ci
   category: devops
   key_prefixes: ["glcbt-"]
@@ -1650,7 +1650,7 @@
   metadata_from_validation:
     name_path: "email"
 
-# Monitoring
+
 - name: sentry
   category: monitoring
   key_prefixes: ["sntrys_"]
@@ -1706,7 +1706,7 @@
   metadata_from_validation:
     name_path: "data.0.name"
 
-# Database
+
 - name: mongodb_atlas
   category: database
   key_prefixes: []
@@ -1759,7 +1759,7 @@
     url: "https://{{key.client_id}}.r2.cloudflarestorage.com"
     auth: "bearer"
 
-# Productivity
+
 - name: linear
   category: productivity
   key_prefixes: ["lin_api_"]
@@ -1820,7 +1820,7 @@
   metadata_from_validation:
     name_path: "email"
 
-# E-commerce & CMS
+
 - name: shopify
   category: ecommerce
   key_prefixes: []
@@ -1876,7 +1876,7 @@
   metadata_from_validation:
     name_path: "sites.0.name"
 
-# Blockchain
+
 - name: alchemy
   category: blockchain
   key_prefixes: []
@@ -1924,7 +1924,7 @@
     url: "https://api.etherscan.io/api?module=account&action=balance"
     auth: "query:apikey"
 
-# Testing
+
 - name: lambdatest
   category: testing
   key_prefixes: ["lambdatest_"]
@@ -1956,7 +1956,7 @@
     url: "https://{{key.client_id}}.testrail.io/index.php?/api/v2/get_user"
     auth: "basic"
 
-# Deployment
+
 - name: koyeb
   category: deployment
   key_prefixes: ["koyeb_"]
@@ -1979,7 +1979,7 @@
   metadata_from_validation:
     name_path: "data.0.name"
 
-# Search
+
 - name: algolia_search
   category: search
   key_prefixes: ["algolia_"]
@@ -2011,7 +2011,7 @@
     url: "https://{{key.client_id}}.typesense.net/debug"
     auth: "header:x-typesense-api-key"
 
-# Feature Flags
+
 - name: launchdarkly
   category: feature_flags
   key_prefixes: ["ld-"]
@@ -2052,7 +2052,7 @@
     url: "https://{{key.client_id}}.unleash-hosted.com/api/admin/projects"
     auth: "bearer"
 
-# Security & SAST/DAST
+
 - name: sonarqube
   category: security
   key_prefixes: ["squ_"]
@@ -2100,7 +2100,7 @@
     url: "https://{{key.client_id}}.checkmarx.net/cxrestapi/auth/validate"
     auth: "bearer"
 
-# CMS & Headless
+
 - name: storyblok
   category: cms
   key_prefixes: ["storyblok_"]
@@ -2132,7 +2132,7 @@
     url: "https://{{key.client_id}}.prismic.io/api/v2"
     auth: "bearer"
 
-# Search
+
 - name: swiftype
   category: search
   key_prefixes: ["engine-"]
@@ -2142,7 +2142,7 @@
     url: "https://api.swiftype.com/api/v1/engines"
     auth: "bearer"
 
-# Web3
+
 - name: moralis
   category: web3
   key_prefixes: ["moralis_"]
@@ -2172,7 +2172,7 @@
   metadata_from_validation:
     name_path: "username"
 
-# Monitoring
+
 - name: logrocket
   category: monitoring
   key_prefixes: ["logrocket_"]
@@ -2194,7 +2194,7 @@
       Content-Type: "application/json"
     body: '{"api_key":"{{key}}","format":"json"}'
 
-# API Gateway
+
 - name: kong
   category: api_gateway
   key_prefixes: []
@@ -2213,7 +2213,7 @@
     url: "https://{{key.client_id}}/api/apis"
     auth: "bearer"
 
-# Documentation
+
 - name: confluence
   category: documentation
   key_prefixes: []
@@ -2232,7 +2232,7 @@
     url: "https://api.miro.com/v2/boards"
     auth: "bearer"
 
-# E-commerce
+
 - name: woocommerce
   category: ecommerce
   key_prefixes: []
@@ -2251,7 +2251,7 @@
     url: "https://api.bigcommerce.com/v3/store"
     auth: "bearer"
 
-# Secrets Management
+
 - name: bitwarden
   category: secrets
   key_prefixes: ["bw_"]
@@ -2270,7 +2270,7 @@
     url: "https://{{key.client_id}}/v1/vaults"
     auth: "bearer"
 
-# Container Registry
+
 - name: docker_hub
   category: container
   key_prefixes: ["dckr_pat_"]
@@ -2280,7 +2280,7 @@
     url: "https://hub.docker.com/v2/user"
     auth: "bearer"
 
-# Databases
+
 - name: cockroachdb
   category: database
   key_prefixes: ["crdb_"]
@@ -2317,7 +2317,7 @@
     url: "https://console.timescale.cloud/api/v1/services"
     auth: "bearer"
 
-# IAC & DevOps
+
 - name: env0
   category: iac
   key_prefixes: ["env0_"]
@@ -2345,7 +2345,7 @@
     url: "https://api.bridgecrew.io/v1/validate"
     auth: "bearer"
 
-# CI/CD
+
 - name: argo_cd
   category: cicd
   key_prefixes: []
@@ -2355,7 +2355,7 @@
     url: "https://{{key.client_id}}/api/v1/session"
     auth: "bearer"
 
-# Testing
+
 - name: testingbot
   category: testing
   key_prefixes: ["testingbot_"]
@@ -2374,7 +2374,7 @@
     url: "https://www.chromatic.com/api/v1/projects"
     auth: "bearer"
 
-# Collaboration
+
 - name: height
   category: collaboration
   key_prefixes: ["height_"]
@@ -2393,7 +2393,7 @@
     url: "https://api.shortcutapp.com/api/v3/members"
     auth: "bearer"
 
-# Communication
+
 - name: knock
   category: communication
   key_prefixes: ["knock_"]
@@ -2403,7 +2403,7 @@
     url: "https://api.knock.app/v1/users"
     auth: "bearer"
 
-# Auth & Identity
+
 - name: workos
   category: auth
   key_prefixes: ["workos_"]
@@ -2440,7 +2440,7 @@
     url: "https://{{key.client_id}}/api/user"
     auth: "bearer"
 
-# Modern Cloud & Serverless
+
 - name: render
   category: cloud
   key_prefixes: ["rnd_"]
@@ -2495,7 +2495,7 @@
     url: "https://{{key.client_id}}/api/v1/projects"
     auth: "bearer"
 
-# Modern AI/ML
+
 - name: chroma
   category: ai_ml
   key_prefixes: []
