@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
@@ -11,18 +12,23 @@ import (
 	"math/big"
 	"os"
 	"os/signal"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
 
 	"github.com/Grey-Magic/kunji/pkg/models"
+	"github.com/Grey-Magic/kunji/pkg/utils"
 	"github.com/Grey-Magic/kunji/pkg/validators"
 	"github.com/pterm/pterm"
 )
 
 type Runner struct {
 	Threads          int
+	adaptiveThreads  int
+	threadMux        sync.RWMutex
 	Proxy            string
 	Retries          int
 	Timeout          int
@@ -31,29 +37,37 @@ type Runner struct {
 	ManualCategory   string
 	Resume           bool
 	MinKeyLength     int
+	OnlyValid        bool
+	MinBalance       float64
+	DeepScan         bool
+	Password         string
+	Bench            bool
 	Validators       map[string]validators.Validator
 	Detector         *validators.Detector
 	sharedHTTPClient interface{}
 }
 
-func NewRunner(threads int, proxy string, retries int, timeout int, out string, manualProv string, manualCat string, resume bool) (*Runner, error) {
+func NewRunner(threads int, proxy string, retries int, timeout int, out string, manualProv string, manualCat string, resume bool, onlyValid bool, minBalance float64) (*Runner, error) {
 	v, configs, err := validators.InitValidatorsWithConfigs(proxy, timeout)
 	if err != nil {
 		return nil, err
 	}
 
 	return &Runner{
-		Threads:        threads,
-		Proxy:          proxy,
-		Retries:        retries,
-		Timeout:        timeout,
-		OutFile:        out,
-		ManualProvider: strings.ToLower(manualProv),
-		ManualCategory: strings.ToLower(manualCat),
-		Resume:         resume,
-		MinKeyLength:   4,
-		Validators:     v,
-		Detector:       validators.NewDetectorFromConfigs(configs),
+		Threads:         threads,
+		adaptiveThreads: threads,
+		Proxy:           proxy,
+		Retries:         retries,
+		Timeout:         timeout,
+		OutFile:         out,
+		ManualProvider:  strings.ToLower(manualProv),
+		ManualCategory:  strings.ToLower(manualCat),
+		Resume:          resume,
+		MinKeyLength:    4,
+		OnlyValid:       onlyValid,
+		MinBalance:      minBalance,
+		Validators:      v,
+		Detector:        validators.NewDetectorFromConfigs(configs),
 	}, nil
 }
 
@@ -107,7 +121,8 @@ func (r *Runner) LoadAndFilterKeys(singleKey, keyFile string) ([]string, error) 
 		k = strings.TrimSpace(k)
 
 		if len(k) >= r.MinKeyLength {
-			if alreadyProcessed[k] {
+			h := r.hashKey(k)
+			if alreadyProcessed[h] {
 				continue
 			}
 
@@ -203,7 +218,6 @@ func (r *Runner) Run(keys []string) {
 		defer progressTicker.Stop()
 	}
 
-	// Live UI Area for worker status
 	area, _ := pterm.DefaultArea.Start()
 	defer area.Stop()
 
@@ -221,7 +235,6 @@ func (r *Runner) Run(keys []string) {
 				updateCounter = 0
 			}
 
-			// Update live area
 			var areaText string
 			for i := len(lastResults) - 1; i >= 0; i-- {
 				res := lastResults[i]
@@ -250,22 +263,31 @@ func (r *Runner) Run(keys []string) {
 
 			updateCounterMutex.Lock()
 			updateCounter++
-			// Track last 5 results for live area
+
 			lastResults = append(lastResults, res)
 			if len(lastResults) > 5 {
 				lastResults = lastResults[1:]
 			}
 			updateCounterMutex.Unlock()
 
-			if r.OutFile != "" {
-				if collectAllResults {
+			shouldKeep := true
+			if r.OnlyValid && (!res.IsValid || res.Balance < r.MinBalance) {
+				shouldKeep = false
+			}
+
+			if shouldKeep {
+				if r.OutFile != "" {
+					// If password is set, we must collect all results and encrypt at the end
+					// instead of streaming to file.
+					if collectAllResults || r.Password != "" {
+						allResults = append(allResults, *res)
+					}
+					if !strings.HasSuffix(strings.ToLower(r.OutFile), ".json") && r.Password == "" {
+						r.writeResult(resultFile, csvWriter, res)
+					}
+				} else {
 					allResults = append(allResults, *res)
 				}
-				if !strings.HasSuffix(strings.ToLower(r.OutFile), ".json") {
-					r.writeResult(resultFile, csvWriter, res)
-				}
-			} else {
-				allResults = append(allResults, *res)
 			}
 		}
 	}
@@ -320,117 +342,130 @@ func (r *Runner) worker(jobs <-chan string, results chan<- *models.ValidationRes
 	defer wg.Done()
 
 	for key := range jobs {
-		var providerName string
+
+		var providersToTry []string
 		var suggestions []string
 
 		if r.ManualProvider != "" {
-			providerName = r.ManualProvider
+			providersToTry = []string{r.ManualProvider}
 		} else {
 			detectionResult := r.Detector.DetectProviderWithSuggestion(key, r.ManualCategory)
-			providerName = detectionResult.Provider
-			suggestions = detectionResult.Suggestions
+			if detectionResult.Provider != "unknown" {
+				providersToTry = []string{detectionResult.Provider}
+			}
+			if r.DeepScan && len(detectionResult.Suggestions) > 0 {
+				for _, s := range detectionResult.Suggestions {
+					if detectionResult.Provider != s {
+						providersToTry = append(providersToTry, s)
+					}
+				}
+			}
+			if len(providersToTry) == 0 && detectionResult.Provider == "unknown" {
+				suggestions = detectionResult.Suggestions
+			}
 		}
 
-		val, exists := r.Validators[providerName]
-		if !exists {
-			errMsg := "Unknown provider or unsupported key format"
-			if r.ManualProvider == "" && providerName == "unknown" {
-				if len(suggestions) > 0 {
-					errMsg = fmt.Sprintf("Could not auto-detect provider. Use -p flag to specify manually. Did you mean: %s?", strings.Join(suggestions, ", "))
-				} else {
-					errMsg = "Could not auto-detect provider. Use -p flag to specify manually (e.g., -p openai)"
-				}
-			} else if r.ManualProvider != "" && providerName == r.ManualProvider {
-				errMsg = fmt.Sprintf("Provider '%s' not found. Use 'kunji providers' to list available providers", r.ManualProvider)
+		if len(providersToTry) == 0 {
+			errMsg := "Could not auto-detect provider. Use -p flag to specify manually."
+			if len(suggestions) > 0 {
+				errMsg = fmt.Sprintf("Could not auto-detect provider. Did you mean: %s?", strings.Join(suggestions, ", "))
 			}
 			results <- &models.ValidationResult{
 				Key:          key,
-				Provider:     providerName,
+				Provider:     "unknown",
 				IsValid:      false,
 				ErrorMessage: errMsg,
-				ResponseTime: 0,
 			}
 			continue
 		}
 
-		var finalRes *models.ValidationResult
-		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(r.Timeout)*time.Second*time.Duration(r.Retries+1))
-		defer cancel()
+		var lastResult *models.ValidationResult
+		for _, providerName := range providersToTry {
+			val, exists := r.Validators[providerName]
+			if !exists {
+				continue
+			}
 
-		for attempt := 0; attempt <= r.Retries; attempt++ {
-			select {
-			case <-ctx.Done():
+			finalRes := r.validateWithRetries(val, key, providerName)
+			lastResult = finalRes
+			if finalRes.IsValid {
+				break
+			}
+		}
+		results <- lastResult
+	}
+}
+
+func (r *Runner) validateWithRetries(val validators.Validator, key, providerName string) *models.ValidationResult {
+	var finalRes *models.ValidationResult
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(r.Timeout)*time.Second*time.Duration(r.Retries+1))
+	defer cancel()
+
+	for attempt := 0; attempt <= r.Retries; attempt++ {
+		res, err := val.Validate(ctx, key)
+
+		if err != nil {
+			errStr := err.Error()
+			if strings.Contains(errStr, "timeout") {
+				errStr = "Request Timeout"
+			}
+
+			if attempt == r.Retries {
 				finalRes = &models.ValidationResult{
-					Key:          key,
-					Provider:     providerName,
-					IsValid:      false,
-					ErrorMessage: "Request Timeout",
+					Key: key, Provider: providerName, IsValid: false, ErrorMessage: errStr,
 				}
 				break
-			default:
 			}
-
-			res, err := val.Validate(ctx, key)
-
-			if err != nil {
-				errStr := err.Error()
-
-				if strings.Contains(errStr, "context deadline exceeded") || strings.Contains(errStr, "timeout") {
-					errStr = "Request Timeout"
-				} else if strings.Contains(errStr, "no such host") {
-					errStr = "DNS Resolution Error"
-				} else if strings.Contains(errStr, "connection refused") {
-					errStr = "Connection Refused"
-				}
-
-				if attempt == r.Retries {
-					finalRes = &models.ValidationResult{
-						Key:          key,
-						Provider:     providerName,
-						IsValid:      false,
-						ErrorMessage: errStr,
-					}
-					break
-				}
-				backoff := time.Duration(1<<attempt) * time.Second
-				if backoff > 10*time.Second {
-					backoff = 10 * time.Second
-				}
-				backoff = r.addJitter(backoff)
-				time.Sleep(backoff)
-				continue
-			}
-
-			if res.StatusCode == 429 && attempt < r.Retries {
-				backoffSecs := 2
-				if res.RetryAfter > 0 {
-					backoffSecs = res.RetryAfter
-					if backoffSecs > 30 {
-						backoffSecs = 30
-					}
-				}
-				backoff := time.Duration(backoffSecs) * time.Second
-				backoff = r.addJitter(backoff)
-
-				pterm.Warning.Printfln("Rate limited by %s, backing off for %s...", providerName, backoff.Round(time.Second))
-				time.Sleep(backoff)
-				attempt++
-				continue
-			}
-
-			finalRes = res
-			break
+			time.Sleep(r.addJitter(time.Duration(1<<attempt) * time.Second))
+			continue
 		}
 
-		if finalRes == nil {
-			finalRes = &models.ValidationResult{
-				Key:          key,
-				Provider:     providerName,
-				IsValid:      false,
-				ErrorMessage: "Validation failed - all retries exhausted",
+		if res.StatusCode == 429 && attempt < r.Retries {
+			r.adjustThreads(false)
+			backoff := 2
+			if res.RetryAfter > 0 {
+				backoff = res.RetryAfter
+			}
+			time.Sleep(r.addJitter(time.Duration(backoff) * time.Second))
+			continue
+		}
+
+		if res.IsValid {
+			r.adjustThreads(true)
+			if r.Bench {
+				var totalTime float64 = res.ResponseTime
+				count := 1
+				for i := 0; i < 2; i++ {
+					time.Sleep(200 * time.Millisecond) // Small delay
+					benchRes, err := val.Validate(ctx, key)
+					if err == nil {
+						totalTime += benchRes.ResponseTime
+						count++
+					}
+				}
+				res.ResponseTime = totalTime / float64(count)
+				res.StatusNote = fmt.Sprintf("Benchmarked (%d samples)", count)
 			}
 		}
-		results <- finalRes
+
+		finalRes = res
+		break
+	}
+	return finalRes
+}
+
+func (r *Runner) adjustThreads(increase bool) {
+	r.threadMux.Lock()
+	defer r.threadMux.Unlock()
+	if increase {
+		if r.adaptiveThreads < r.Threads {
+			r.adaptiveThreads++
+		}
+	} else {
+		r.adaptiveThreads = r.adaptiveThreads / 2
+		if r.adaptiveThreads < 1 {
+			r.adaptiveThreads = 1
+		}
 	}
 }
 
@@ -493,6 +528,15 @@ func (r *Runner) writeResult(f *os.File, cw *csv.Writer, res *models.ValidationR
 		return
 	}
 
+	if strings.HasSuffix(ext, ".jsonl") {
+		data, err := json.Marshal(res)
+		if err == nil {
+			f.Write(data)
+			f.WriteString("\n")
+		}
+		return
+	}
+
 	status := "INVALID"
 	if res.IsValid {
 		status = "VALID"
@@ -527,6 +571,20 @@ func (r *Runner) displayResultsTable(results []models.ValidationResult) {
 	pterm.Println()
 	pterm.DefaultSection.Println("Validation Results")
 
+	sort.Slice(results, func(i, j int) bool {
+		if results[i].Balance != results[j].Balance {
+			return results[i].Balance > results[j].Balance
+		}
+
+		qi := r.getNumericQuota(results[i])
+		qj := r.getNumericQuota(results[j])
+		if qi != qj {
+			return qi > qj
+		}
+
+		return results[i].Provider < results[j].Provider
+	})
+
 	validResults := []models.ValidationResult{}
 	invalidResults := []models.ValidationResult{}
 
@@ -547,6 +605,27 @@ func (r *Runner) displayResultsTable(results []models.ValidationResult) {
 		pterm.Println(pterm.Red("❌ Invalid Keys (" + fmt.Sprintf("%d", len(invalidResults)) + "):"))
 		r.displayInvalidKeysTable(invalidResults)
 	}
+}
+
+func (r *Runner) getNumericQuota(res models.ValidationResult) float64 {
+	if res.Extra == nil {
+		return 0
+	}
+
+	for _, key := range []string{"quota", "credits"} {
+		if val, ok := res.Extra[key]; ok {
+			switch v := val.(type) {
+			case float64:
+				return v
+			case int:
+				return float64(v)
+			case string:
+				f, _ := strconv.ParseFloat(v, 64)
+				return f
+			}
+		}
+	}
+	return 0
 }
 
 func (r *Runner) displayValidKeysTable(results []models.ValidationResult) {
@@ -747,7 +826,41 @@ func (r *Runner) exportResults(results []models.ValidationResult) {
 		return
 	}
 
+	if r.Password != "" {
+		var buf strings.Builder
+		if strings.HasSuffix(ext, ".csv") {
+			cw := csv.NewWriter(&buf)
+			cw.Write([]string{"Key", "Provider", "IsValid", "Status", "Response", "Balance", "Account", "Email", "Error"})
+			for _, res := range results {
+				cw.Write([]string{
+					res.Key, res.Provider, fmt.Sprintf("%t", res.IsValid),
+					fmt.Sprintf("%d", res.StatusCode), fmt.Sprintf("%.2fs", res.ResponseTime),
+					fmt.Sprintf("%.5f", res.Balance), res.AccountName, res.Email, res.ErrorMessage,
+				})
+			}
+			cw.Flush()
+		} else if strings.HasSuffix(ext, ".jsonl") {
+			for _, res := range results {
+				data, _ := json.Marshal(res)
+				buf.Write(data)
+				buf.WriteString("\n")
+			}
+		} else {
+			for _, res := range results {
+				buf.WriteString(fmt.Sprintf("%s | %s | %t | %s\n", res.Key, res.Provider, res.IsValid, res.ErrorMessage))
+			}
+		}
+		r.encryptAndWrite([]byte(buf.String()))
+		pterm.Success.Printfln("Results ENCRYPTED and exported to %s (%d entries)", r.OutFile, len(results))
+		return
+	}
+
 	if strings.HasSuffix(ext, ".csv") {
+		pterm.Success.Printfln("Results exported to %s (%d entries)", r.OutFile, len(results))
+		return
+	}
+
+	if strings.HasSuffix(ext, ".jsonl") {
 		pterm.Success.Printfln("Results exported to %s (%d entries)", r.OutFile, len(results))
 		return
 	}
@@ -776,12 +889,29 @@ func (r *Runner) exportJSON(results []models.ValidationResult) {
 		return
 	}
 
+	if r.Password != "" {
+		r.encryptAndWrite(data)
+		pterm.Success.Printfln("Results ENCRYPTED and exported to %s (Total: %d)", r.OutFile, len(existing))
+		return
+	}
+
 	if err := os.WriteFile(r.OutFile, data, 0600); err != nil {
 		pterm.Error.Printfln("Error writing %s: %v", r.OutFile, err)
 		return
 	}
 
 	pterm.Success.Printfln("Results exported to %s (Total: %d)", r.OutFile, len(existing))
+}
+
+func (r *Runner) encryptAndWrite(data []byte) {
+	encrypted, err := utils.Encrypt(data, r.Password)
+	if err != nil {
+		pterm.Error.Printfln("Encryption failed: %v", err)
+		return
+	}
+	if err := os.WriteFile(r.OutFile, encrypted, 0600); err != nil {
+		pterm.Error.Printfln("Error writing encrypted file %s: %v", r.OutFile, err)
+	}
 }
 
 func maskKey(k string) string {
@@ -801,63 +931,73 @@ func (r *Runner) loadExistingKeys() map[string]bool {
 		return existing
 	}
 
-	file, err := os.Open(r.OutFile)
+	data, err := os.ReadFile(r.OutFile)
 	if err != nil {
 		return existing
 	}
-	defer file.Close()
+
+	if r.Password != "" {
+		decrypted, err := utils.Decrypt(data, r.Password)
+		if err == nil {
+			data = decrypted
+		}
+	}
 
 	ext := tolower(r.OutFile)
 
 	if strings.HasSuffix(ext, ".json") {
 		var results []models.ValidationResult
-		if err := json.NewDecoder(file).Decode(&results); err != nil {
-			pterm.Warning.Printfln("Error parsing resume file: %v", err)
-		} else {
+		if err := json.Unmarshal(data, &results); err == nil {
 			for _, res := range results {
-				existing[res.Key] = true
+				existing[r.hashKey(res.Key)] = true
+			}
+		}
+		return existing
+	}
+
+	content := string(data)
+	lines := strings.Split(content, "\n")
+
+	if strings.HasSuffix(ext, ".jsonl") {
+		for _, line := range lines {
+			if strings.TrimSpace(line) == "" {
+				continue
+			}
+			var res models.ValidationResult
+			if err := json.Unmarshal([]byte(line), &res); err == nil {
+				existing[r.hashKey(res.Key)] = true
 			}
 		}
 		return existing
 	}
 
 	if strings.HasSuffix(ext, ".csv") {
-		reader := csv.NewReader(file)
-
-		_, err := reader.Read()
-		if err != nil {
-			return existing
-		}
-
+		reader := csv.NewReader(strings.NewReader(content))
+		_, _ = reader.Read() // Skip header
 		for {
 			record, err := reader.Read()
 			if err == io.EOF {
 				break
 			}
-			if err != nil {
-				pterm.Warning.Printfln("Error reading CSV: %v", err)
-				break
-			}
-			if len(record) > 0 {
-				existing[record[0]] = true
+			if err == nil && len(record) > 0 {
+				existing[r.hashKey(record[0])] = true
 			}
 		}
 		return existing
 	}
 
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line != "" {
-			existing[line] = true
+	for _, line := range lines {
+		key := strings.TrimSpace(line)
+		if key != "" {
+			existing[r.hashKey(key)] = true
 		}
 	}
 
-	if err := scanner.Err(); err != nil {
-		pterm.Warning.Printfln("Error reading resume file: %v", err)
-	}
-
 	return existing
+}
+
+func (r *Runner) hashKey(key string) string {
+	return fmt.Sprintf("%x", sha256.Sum256([]byte(key)))
 }
 
 func (r *Runner) addJitter(d time.Duration) time.Duration {
