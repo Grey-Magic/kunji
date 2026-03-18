@@ -116,9 +116,8 @@ kunji check-proxies --proxy proxies.txt
 Kunji is designed with data privacy and security as a core mandate:
 
 1. **User-Only Permissions:** All result files are created with `0600` permissions (`-rw-------`), ensuring only you can read your validated keys.
-2. **SSRF Protection:** Built-in validation blocks requests to `localhost` and private IP ranges, preventing the tool from being used as an internal scanner.
-3. **Secret Scrubbing:** Kunji automatically detects and masks API keys in error messages (`[MASKED_KEY]`) before they are saved to disk.
-4. **No Data Exfiltration:** Validation happens directly between your machine and the provider API.
+2. **Secret Scrubbing:** Kunji automatically detects and masks API keys in error messages (`[MASKED_KEY]`) before they are saved to disk.
+3. **No Data Exfiltration:** Validation happens directly between your machine and the provider API.
 
 ---
 
