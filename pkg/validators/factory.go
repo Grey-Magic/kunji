@@ -17,10 +17,12 @@ func InitValidatorsWithConfigs(proxy string, timeout int) (map[string]Validator,
 		return nil, nil, fmt.Errorf("creating shared HTTP client: %w", err)
 	}
 
+	sharedLimiter := client.NewRateLimiterManager(10, 10)
+
 	validatorsMap := make(map[string]Validator, len(configs))
 
 	for _, cfg := range configs {
-		validatorsMap[cfg.Name] = NewGenericValidatorWithClient(cfg, sharedClient)
+		validatorsMap[cfg.Name] = NewGenericValidatorWithClient(cfg, sharedClient, sharedLimiter)
 	}
 
 	return validatorsMap, configs, nil

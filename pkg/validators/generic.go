@@ -4,10 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/tidwall/gjson"
 	"io"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Grey-Magic/kunji/pkg/client"
@@ -18,13 +21,15 @@ import (
 type GenericValidator struct {
 	config    ProviderConfig
 	client    *http.Client
+	limiter   *client.RateLimiterManager
 	bodyBytes []byte
 }
 
-func NewGenericValidatorWithClient(cfg ProviderConfig, httpClient *http.Client) *GenericValidator {
+func NewGenericValidatorWithClient(cfg ProviderConfig, httpClient *http.Client, limiter *client.RateLimiterManager) *GenericValidator {
 	return &GenericValidator{
 		config:    cfg,
 		client:    httpClient,
+		limiter:   limiter,
 		bodyBytes: []byte(cfg.Validation.Body),
 	}
 }
@@ -34,9 +39,12 @@ func NewGenericValidator(cfg ProviderConfig, proxy string, timeout int) (*Generi
 	if err != nil {
 		return nil, err
 	}
+
+	limiter := client.NewRateLimiterManager(10, 10)
 	return &GenericValidator{
 		config:    cfg,
 		client:    httpClient,
+		limiter:   limiter,
 		bodyBytes: []byte(cfg.Validation.Body),
 	}, nil
 }
@@ -45,12 +53,16 @@ func (v *GenericValidator) Name() string          { return v.config.Name }
 func (v *GenericValidator) KeyPatterns() []string { return v.config.KeyPatterns }
 
 func (v *GenericValidator) Validate(ctx context.Context, apiKey string) (*models.ValidationResult, error) {
+	if v.limiter != nil {
+		if err := v.limiter.Wait(ctx, v.Name()); err != nil {
+			return nil, err
+		}
+	}
 	start := time.Now()
 	cfg := v.config.Validation
 
 	url := strings.ReplaceAll(cfg.URL, "{{key}}", apiKey)
 
-	// Support Composite Keys for interpolation
 	bodyStr := string(v.bodyBytes)
 	bodyStr = strings.ReplaceAll(bodyStr, "{{key}}", apiKey)
 
@@ -185,15 +197,25 @@ func (v *GenericValidator) extractValidationMetadata(bodyBytes []byte, result *m
 		return
 	}
 
-	var data interface{}
-	if err := json.Unmarshal(bodyBytes, &data); err != nil {
-		return
+	bodyStr := string(bodyBytes)
+
+	if mfv.RegexExtract != "" {
+		re, err := regexp.Compile(mfv.RegexExtract)
+		if err == nil {
+			matches := re.FindStringSubmatch(bodyStr)
+			if len(matches) > mfv.RegexExtractMatch {
+				if result.Extra == nil {
+					result.Extra = make(map[string]interface{})
+				}
+				result.Extra["regex_extracted"] = matches[mfv.RegexExtractMatch]
+			}
+		}
 	}
 
 	if mfv.BalancePath != "" {
-		bal := extractJSONPath(data, mfv.BalancePath)
+		bal := gjson.GetBytes(bodyBytes, mfv.BalancePath).Value()
 		if mfv.BalanceSubtractPath != "" {
-			sub := extractJSONPath(data, mfv.BalanceSubtractPath)
+			sub := gjson.GetBytes(bodyBytes, mfv.BalanceSubtractPath).Value()
 			result.Balance = toFloat64(bal) - toFloat64(sub)
 		} else {
 			result.Balance = toFloat64(bal)
@@ -204,53 +226,53 @@ func (v *GenericValidator) extractValidationMetadata(bodyBytes []byte, result *m
 		if result.Extra == nil {
 			result.Extra = make(map[string]interface{})
 		}
-		result.Extra["quota"] = extractJSONPath(data, mfv.QuotaPath)
+		result.Extra["quota"] = gjson.GetBytes(bodyBytes, mfv.QuotaPath).Value()
 	}
 
 	if mfv.CreditsPath != "" {
 		if result.Extra == nil {
 			result.Extra = make(map[string]interface{})
 		}
-		result.Extra["credits"] = extractJSONPath(data, mfv.CreditsPath)
+		result.Extra["credits"] = gjson.GetBytes(bodyBytes, mfv.CreditsPath).Value()
 	}
 
 	if mfv.VIPLevelPath != "" {
 		if result.Extra == nil {
 			result.Extra = make(map[string]interface{})
 		}
-		result.Extra["vip_level"] = extractJSONPath(data, mfv.VIPLevelPath)
+		result.Extra["vip_level"] = gjson.GetBytes(bodyBytes, mfv.VIPLevelPath).Value()
 	}
 
 	if mfv.TeamNamePath != "" {
 		if result.Extra == nil {
 			result.Extra = make(map[string]interface{})
 		}
-		result.Extra["team_name"] = extractJSONPath(data, mfv.TeamNamePath)
+		result.Extra["team_name"] = gjson.GetBytes(bodyBytes, mfv.TeamNamePath).Value()
 	}
 
 	if mfv.UsernamePath != "" {
 		if result.Extra == nil {
 			result.Extra = make(map[string]interface{})
 		}
-		result.Extra["username"] = extractJSONPath(data, mfv.UsernamePath)
+		result.Extra["username"] = gjson.GetBytes(bodyBytes, mfv.UsernamePath).Value()
 	}
 
 	if mfv.NamePath != "" {
-		name := extractJSONPath(data, mfv.NamePath)
-		if s, ok := name.(string); ok && s != "" {
-			result.AccountName = s
+		nameRes := gjson.GetBytes(bodyBytes, mfv.NamePath)
+		if nameRes.Exists() && nameRes.String() != "" {
+			result.AccountName = nameRes.String()
 		} else if mfv.NameFallbackPath != "" {
-			fallback := extractJSONPath(data, mfv.NameFallbackPath)
-			if s, ok := fallback.(string); ok {
-				result.AccountName = s
+			fallbackRes := gjson.GetBytes(bodyBytes, mfv.NameFallbackPath)
+			if fallbackRes.Exists() {
+				result.AccountName = fallbackRes.String()
 			}
 		}
 	}
 
 	if mfv.EmailPath != "" {
-		email := extractJSONPath(data, mfv.EmailPath)
-		if s, ok := email.(string); ok {
-			result.Email = s
+		emailRes := gjson.GetBytes(bodyBytes, mfv.EmailPath)
+		if emailRes.Exists() {
+			result.Email = emailRes.String()
 		}
 	}
 }
@@ -270,7 +292,10 @@ func (v *GenericValidator) fetchChainMetadata(ctx context.Context, apiKey string
 		variables["key.secret"] = parts[1]
 	}
 
+	var mu sync.Mutex
+
 	for _, step := range v.config.Metadata {
+
 		url := step.URL
 		for k, val := range variables {
 			url = strings.ReplaceAll(url, "{{"+k+"}}", val)
@@ -328,56 +353,37 @@ func (v *GenericValidator) fetchChainMetadata(ctx context.Context, apiKey string
 			return
 		}
 
-		var data interface{}
-		if err := json.Unmarshal(respBytes, &data); err != nil {
-			result.ErrorMessage = "Metadata error: invalid JSON response"
-			return
+		if step.RegexExtract != "" {
+			re, err := regexp.Compile(step.RegexExtract)
+			if err == nil {
+				matches := re.FindStringSubmatch(string(respBytes))
+				if len(matches) > step.RegexExtractMatch {
+					if step.StoreAs != "" {
+						variables[step.StoreAs] = matches[step.RegexExtractMatch]
+					}
+				}
+			}
 		}
 
 		if step.Extract != "" && step.StoreAs != "" {
-			val := extractJSONPath(data, step.Extract)
-			if s, ok := val.(string); ok {
-				variables[step.StoreAs] = s
-			} else if val != nil {
-				variables[step.StoreAs] = fmt.Sprintf("%v", val)
-			} else {
+			val := gjson.GetBytes(respBytes, step.Extract)
+			if val.Exists() {
+				variables[step.StoreAs] = val.String()
+			} else if step.RegexExtract == "" {
 				result.ErrorMessage = fmt.Sprintf("Metadata error: path %s not found in response", step.Extract)
 				return
 			}
 		}
 
 		if step.BalancePath != "" {
-			bal := extractJSONPath(data, step.BalancePath)
-			result.Balance = toFloat64(bal)
-		}
-	}
-}
-
-func extractJSONPath(data interface{}, path string) interface{} {
-	parts := strings.Split(path, ".")
-	current := data
-
-	for _, part := range parts {
-		if current == nil {
-			return nil
-		}
-
-		if idx, err := strconv.Atoi(part); err == nil {
-			if arr, ok := current.([]interface{}); ok && idx < len(arr) {
-				current = arr[idx]
-			} else {
-				return nil
-			}
-		} else {
-			if m, ok := current.(map[string]interface{}); ok {
-				current = m[part]
-			} else {
-				return nil
+			bal := gjson.GetBytes(respBytes, step.BalancePath)
+			if bal.Exists() {
+				mu.Lock()
+				result.Balance = toFloat64(bal.Value())
+				mu.Unlock()
 			}
 		}
 	}
-
-	return current
 }
 
 func toFloat64(val interface{}) float64 {

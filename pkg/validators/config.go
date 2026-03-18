@@ -4,12 +4,14 @@ import (
 	"embed"
 	"fmt"
 	"io/fs"
+	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
 	"sync"
 
+	"github.com/Grey-Magic/kunji/pkg/utils"
 	"github.com/pterm/pterm"
 	"gopkg.in/yaml.v3"
 )
@@ -18,13 +20,15 @@ import (
 var providersFS embed.FS
 
 type MetadataConfig struct {
-	URL         string            `yaml:"url"`
-	Method      string            `yaml:"method"`
-	Auth        string            `yaml:"auth"`
-	Headers     map[string]string `yaml:"headers"`
-	BalancePath string            `yaml:"balance_path"`
-	Extract     string            `yaml:"extract"`
-	StoreAs     string            `yaml:"store_as"`
+	URL               string            `yaml:"url"`
+	Method            string            `yaml:"method"`
+	Auth              string            `yaml:"auth"`
+	Headers           map[string]string `yaml:"headers"`
+	BalancePath       string            `yaml:"balance_path"`
+	Extract           string            `yaml:"extract"`
+	StoreAs           string            `yaml:"store_as"`
+	RegexExtract      string            `yaml:"regex_extract"`
+	RegexExtractMatch int               `yaml:"regex_extract_match"`
 }
 
 type MetadataFromValidation struct {
@@ -38,6 +42,8 @@ type MetadataFromValidation struct {
 	VIPLevelPath        string `yaml:"vip_level_path"`
 	TeamNamePath        string `yaml:"team_name_path"`
 	UsernamePath        string `yaml:"username_path"`
+	RegexExtract        string `yaml:"regex_extract"`
+	RegexExtractMatch   int    `yaml:"regex_extract_match"`
 }
 
 type ValidationConfig struct {
@@ -59,9 +65,10 @@ type ProviderConfig struct {
 }
 
 var (
-	configsCache      []ProviderConfig
-	configsCacheOnce  sync.Once
-	configsCacheError error
+	configsCache       []ProviderConfig
+	configsCacheOnce   sync.Once
+	configsCacheError  error
+	CustomProvidersDir string
 )
 
 func LoadProviderConfigs() ([]ProviderConfig, error) {
@@ -95,6 +102,18 @@ func LoadProviderConfigs() ([]ProviderConfig, error) {
 			return
 		}
 
+		if CustomProvidersDir != "" {
+			importCustomProviderConfigs(&allConfigs, CustomProvidersDir)
+		}
+
+		homeDir, err := os.UserHomeDir()
+		if err == nil {
+			defaultPath := filepath.Join(homeDir, ".kunji", "providers")
+			if _, err := os.Stat(defaultPath); err == nil {
+				importCustomProviderConfigs(&allConfigs, defaultPath)
+			}
+		}
+
 		configsCache = allConfigs
 	})
 
@@ -102,6 +121,36 @@ func LoadProviderConfigs() ([]ProviderConfig, error) {
 		return nil, configsCacheError
 	}
 	return configsCache, nil
+}
+
+func importCustomProviderConfigs(allConfigs *[]ProviderConfig, dir string) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		pterm.Warning.Printfln("Could not read custom providers directory: %v", err)
+		return
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".yaml" {
+			continue
+		}
+
+		path := filepath.Join(dir, entry.Name())
+		data, err := os.ReadFile(path)
+		if err != nil {
+			pterm.Warning.Printfln("Error reading custom provider file %s: %v", path, err)
+			continue
+		}
+
+		var configs []ProviderConfig
+		if err := yaml.Unmarshal(data, &configs); err != nil {
+			pterm.Warning.Printfln("Error parsing custom provider file %s: %v", path, err)
+			continue
+		}
+
+		*allConfigs = append(*allConfigs, configs...)
+		pterm.Info.Printfln("Loaded custom provider file: %s", entry.Name())
+	}
 }
 
 type PrefixEntry struct {
@@ -350,21 +399,22 @@ func FindProviderByName(name string) ([]ProviderInfo, error) {
 	return providers, nil
 }
 
-// DetectionResult contains detection result with optional suggestions
 type DetectionResult struct {
 	Provider    string
 	Suggestions []string
 	Message     string
+	Entropy     float64
 }
 
-// DetectProviderWithSuggestion detects provider and provides suggestions if detection fails
 func DetectProviderWithSuggestion(key string, prefixes []PrefixEntry, patterns []PatternEntry, manualCategory string) DetectionResult {
 	key = strings.TrimSpace(key)
+	entropy := utils.CalculateShannonEntropy(key)
 
 	if key == "" {
 		return DetectionResult{
 			Provider: "unknown",
 			Message:  "Empty key provided",
+			Entropy:  0,
 		}
 	}
 
@@ -392,6 +442,7 @@ func DetectProviderWithSuggestion(key string, prefixes []PrefixEntry, patterns [
 	if len(matches) == 1 {
 		return DetectionResult{
 			Provider: matches[0].provider,
+			Entropy:  entropy,
 		}
 	}
 
@@ -411,9 +462,10 @@ func DetectProviderWithSuggestion(key string, prefixes []PrefixEntry, patterns [
 		if len(longestMatches) == 1 {
 			return DetectionResult{
 				Provider: longestMatches[0].provider,
+				Entropy:  entropy,
 			}
 		}
-		// Multiple matches with same prefix length - return suggestions
+
 		var providerNames []string
 		seen := make(map[string]bool)
 		for _, m := range matches {
@@ -426,11 +478,11 @@ func DetectProviderWithSuggestion(key string, prefixes []PrefixEntry, patterns [
 		return DetectionResult{
 			Provider:    "unknown",
 			Suggestions: suggestions,
-			Message:     fmt.Sprintf("Ambiguous key - matches: %s", strings.Join(providerNames, ", ")),
+			Entropy:     entropy,
+			Message:     fmt.Sprintf("Ambiguous key (Entropy: %.2f) - matches: %s. Try --deep-scan", entropy, strings.Join(providerNames, ", ")),
 		}
 	}
 
-	// No prefix matches - try patterns
 	patternProviders := make(map[string]bool)
 
 	for _, p := range patterns {
@@ -446,6 +498,7 @@ func DetectProviderWithSuggestion(key string, prefixes []PrefixEntry, patterns [
 		for provider := range patternProviders {
 			return DetectionResult{
 				Provider: provider,
+				Entropy:  entropy,
 			}
 		}
 	}
@@ -459,33 +512,35 @@ func DetectProviderWithSuggestion(key string, prefixes []PrefixEntry, patterns [
 		return DetectionResult{
 			Provider:    "unknown",
 			Suggestions: suggestions,
-			Message:     fmt.Sprintf("Ambiguous key - matches: %s", strings.Join(providerNames, ", ")),
+			Entropy:     entropy,
+			Message:     fmt.Sprintf("Ambiguous key (Entropy: %.2f) - matches: %s. Try --deep-scan", entropy, strings.Join(providerNames, ", ")),
 		}
 	}
 
-	// No matches at all - generate suggestions
 	suggestions := generateSuggestions(key, prefixes)
+	msg := "Could not auto-detect provider"
+	if entropy > 3.5 {
+		msg = fmt.Sprintf("Unknown high-entropy key (%.2f). Use --deep-scan to brute-force likely providers.", entropy)
+	}
 	return DetectionResult{
 		Provider:    "unknown",
 		Suggestions: suggestions,
-		Message:     "Could not auto-detect provider",
+		Entropy:     entropy,
+		Message:     msg,
 	}
 }
 
-// generateSuggestions finds providers with similar prefixes
 func generateSuggestions(key string, prefixes []PrefixEntry) []string {
 	keyLower := strings.ToLower(key)
 
-	// Find prefixes that partially match
 	var suggestions []string
 	seen := make(map[string]bool)
 
-	// First, check for any prefix match (even partial)
 	for _, p := range prefixes {
 		if len(p.Prefix) < 3 {
 			continue
 		}
-		// Check if key starts with same characters as prefix
+
 		if strings.HasPrefix(keyLower, p.Prefix[:min(len(p.Prefix), len(key))]) {
 			if !seen[p.Provider] {
 				seen[p.Provider] = true
@@ -494,7 +549,6 @@ func generateSuggestions(key string, prefixes []PrefixEntry) []string {
 		}
 	}
 
-	// If no prefix matches, suggest providers with common prefixes
 	if len(suggestions) == 0 {
 		commonPrefixes := []string{"sk-", "sk_", "api_", "key-", "pk.", "token"}
 		for _, cp := range commonPrefixes {
@@ -511,7 +565,6 @@ func generateSuggestions(key string, prefixes []PrefixEntry) []string {
 		}
 	}
 
-	// Limit to top 5 suggestions
 	if len(suggestions) > 5 {
 		suggestions = suggestions[:5]
 	}
