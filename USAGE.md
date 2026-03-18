@@ -1,6 +1,6 @@
 # Kunji - Complete Usage Guide
 
-Kunji is a CLI tool that validates API keys across 258 services. This guide covers everything you need to know.
+Kunji is a CLI tool that validates API keys across 260+ services. This guide covers everything you need to know.
 
 ---
 
@@ -12,6 +12,9 @@ Kunji is a CLI tool that validates API keys across 258 services. This guide cove
 
 # From file (one key per line)
 ./kunji validate -f keys.txt
+
+# Interactive Paste Mode (great for quickly pasting a block of text)
+./kunji interactive
 ```
 
 ---
@@ -42,6 +45,31 @@ Kunji is a CLI tool that validates API keys across 258 services. This guide cove
 
 # JSON output
 ./kunji validate -f keys.txt -o results.json
+
+# Stream JSONL output (best for huge files, saves memory)
+./kunji validate -f keys.txt -o results.jsonl
+
+# Only save valid keys
+./kunji validate -f keys.txt -o valid.txt --only-valid
+
+# Only save valid keys with a minimum balance
+./kunji validate -f keys.txt -o funded.txt --only-valid --min-balance 5.0
+```
+
+### Dry Run (Detection Mode)
+
+Want to know what providers your keys belong to without making network requests?
+
+```bash
+./kunji validate -f keys.txt --dry-run
+```
+
+### Custom Providers
+
+If you have your own YAML provider definitions:
+
+```bash
+./kunji validate -f keys.txt --custom-providers ./my-definitions/
 ```
 
 ### Output Formats
@@ -55,6 +83,17 @@ Kunji is a CLI tool that validates API keys across 258 services. This guide cove
 
 # JSON (for scripts)
 ./kunji validate -f keys.txt -o results.json
+
+# JSON Lines (best for large scales)
+./kunji validate -f keys.txt -o results.jsonl
+```
+
+### Proxy Checking
+
+To make sure your proxies are functioning properly before starting a huge scan:
+
+```bash
+./kunji check-proxies --proxy proxy.txt
 ```
 
 ---
@@ -954,4 +993,5 @@ Kunji handles sensitive API keys. Please observe the following security best pra
 
 1. **Result File Permissions:** Kunji automatically creates result files with restrictive permissions (`0600` - readable only by your user). Do not change these permissions unless necessary.
 2. **Plaintext Storage:** Validated keys are stored in plaintext within the output files. **Encrypt or securely delete** these files after use.
-3. **Error Masking:** Kunji automatically scrubs API keys from error messages captured from providers to prevent accidental leakage in logs and result files.
+3. **SSRF Prevention:** Kunji includes built-in protection to prevent SSRF attacks when using composite keys with custom hosts. It will block requests to local or private IP addresses.
+4. **Error Masking:** Kunji automatically scrubs API keys from error messages captured from providers to prevent accidental leakage in logs and result files.

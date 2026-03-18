@@ -1,7 +1,7 @@
 .PHONY: build run test clean install uninstall zip all
 
 BINARY_NAME=kunji
-VERSION=1.0.4
+VERSION=1.0.5
 LDFLAGS=-ldflags "-s -w -X main.version=$(VERSION)"
 
 all: clean build

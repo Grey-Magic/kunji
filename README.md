@@ -1,17 +1,17 @@
 <div align="center">
 
-<pre style="font-family: monospace; font-size: 16px; line-height: 1.2;">
-<span style="color: rgb(95, 0, 135);">  ██   ██ ██    ██ ███    ██      ██ ██</span>
-<span style="color: rgb(135, 45, 175);">  ██  ██  ██    ██ ████   ██      ██ ██</span>
-<span style="color: rgb(155, 70, 195);">  █████   ██    ██ ██ ██  ██      ██ ██</span>
-<span style="color: rgb(175, 95, 215);">  ██  ██  ██    ██ ██  ██ ██ ██   ██ ██</span>
-<span style="color: rgb(195, 120, 235);">  ██   ██  ██████  ██   ████  █████  ██</span>
-</pre>
+```
+  ██   ██ ██    ██ ███    ██      ██ ██
+  ██  ██  ██    ██ ████   ██      ██ ██
+  █████   ██    ██ ██ ██  ██      ██ ██
+  ██  ██  ██    ██ ██  ██ ██ ██   ██ ██
+  ██   ██  ██████  ██   ████  █████  ██
+```
 
 **Universal API Key Validation Engine**
 
 [![Go](https://img.shields.io/badge/Go-1.21%2B-00ADD8?style=flat-square&logo=go)](https://golang.org)
-[![Version](https://img.shields.io/badge/Version-1.0.4-magenta?style=flat-square)](https://github.com/Grey-Magic/kunji/releases)
+[![Version](https://img.shields.io/badge/Version-1.0.5-magenta?style=flat-square)](https://github.com/Grey-Magic/kunji/releases)
 [![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey?style=flat-square)](#installation)
 [![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)](LICENSE)
 
@@ -55,7 +55,9 @@ Validating API Keys [256/260] ████████████████�
 - 📊 **Metadata Extraction** — Automatically retrieves account balance, email, usage limits, and organization names.
 - 🛡️ **Hardened Security** — Built-in SSRF protection, restrictive file permissions, and automatic secret scrubbing in logs.
 - 🔄 **Smart Resume & Retry** — Skip already-validated keys and handle intermittent network failures or rate limits with jittered backoff.
-- 📤 **Clean Export** — Generate structured reports in `.txt`, `.csv`, or `.json` for easy integration with other tools.
+- 📤 **Clean Export** — Generate structured reports in `.txt`, `.csv`, `.json`, or memory-efficient `.jsonl`.
+- 🕹️ **Interactive Paste Mode** — Paste blocks of text and let Kunji auto-extract and validate the keys.
+- 🕵️ **Dry Run Mode** — Detect providers without sending a single network request.
 
 ## 📦 Installation
 
@@ -68,7 +70,7 @@ go install github.com/Grey-Magic/kunji@latest
 Download the latest release for your platform:
 ```bash
 # Example for Linux/macOS
-curl -sL https://github.com/Grey-Magic/kunji/releases/latest/download/kunji_1.0.4.zip -o kunji.zip
+curl -sL https://github.com/Grey-Magic/kunji/releases/latest/download/kunji_1.0.5.zip -o kunji.zip
 unzip kunji.zip && chmod +x kunji
 sudo mv kunji /usr/local/bin/
 ```
@@ -87,11 +89,14 @@ kunji validate -k "sk-proj-..."
 # Bulk validation from a file with 20 workers
 kunji validate -f keys.txt -o results.csv -t 20
 
-# Resume an interrupted run
-kunji validate -f keys.txt --resume -o results.json
+# Resume an interrupted run, only keeping valid keys
+kunji validate -f keys.txt --resume --only-valid -o results.jsonl
 
-# List all 260+ supported services
-kunji validate --list
+# Quick interactive paste mode
+kunji interactive
+
+# Check your proxies
+kunji check-proxies --proxy proxies.txt
 ```
 
 ### Advanced Options
@@ -101,7 +106,21 @@ kunji validate --list
 | `-c, --category` | Limit detection to a category (e.g., `llm`, `payments`). |
 | `--proxy` | Provide a single proxy or a file for automatic rotation. |
 | `--timeout` | Set custom request timeout (default: 15s). |
+| `--dry-run` | Detect providers without making network requests. |
+| `--custom-providers` | Load extra YAML provider definitions from a directory. |
 
+---
+
+## 🔒 Security First
+
+Kunji is designed with data privacy and security as a core mandate:
+
+1. **User-Only Permissions:** All result files are created with `0600` permissions (`-rw-------`), ensuring only you can read your validated keys.
+2. **SSRF Protection:** Built-in validation blocks requests to `localhost` and private IP ranges, preventing the tool from being used as an internal scanner.
+3. **Secret Scrubbing:** Kunji automatically detects and masks API keys in error messages (`[MASKED_KEY]`) before they are saved to disk.
+4. **No Data Exfiltration:** Validation happens directly between your machine and the provider API.
+
+---
 
 ## 🏛️ Supported Providers (260+)
 
@@ -120,6 +139,22 @@ Kunji supports an extensive array of services across multiple domains:
 | **Blockchain** | Alchemy, Infura, QuickNode, Etherscan, Moralis, Thirdweb |
 
 ---
+
+## 🤝 Contributing
+
+Adding a new provider is simple and requires **zero Go code**. Simply add a YAML entry to `pkg/validators/providers/`:
+
+```yaml
+- name: new_service
+  key_prefixes: ["ns-"]
+  key_patterns: ["^ns-[a-zA-Z0-9]{32}$"]
+  validation:
+    method: GET
+    url: "https://api.newservice.com/v1/user"
+    auth: "bearer"
+```
+
+See [**AGENTS.md**](./AGENTS.md) for full development guidelines.
 
 ## 📄 License
 
