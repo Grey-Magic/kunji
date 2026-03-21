@@ -12,19 +12,19 @@ func TestDetectProviderFromIndex(t *testing.T) {
 			Name:        "openai",
 			Category:    "llm",
 			KeyPrefixes: []string{"sk-", "sk-proj-", "sk-svcacct-"},
-			KeyPatterns: []string{"^sk-[a-zA-Z0-9]{32,}$"},
+			KeyPatterns: []string{"^sk-proj-[a-zA-Z0-9_-]{20,}$", "^sk-svcacct-[a-zA-Z0-9_-]{20,}$", "^sk-[a-zA-Z0-9]{20,}$", "^sk-[A-Za-z0-9]{20}T3BlbkFJ[A-Za-z0-9]{20}$"},
 		},
 		{
 			Name:        "anthropic",
 			Category:    "llm",
 			KeyPrefixes: []string{"sk-ant-", "anthropic-"},
-			KeyPatterns: []string{"^anthropic-", "^sk-ant-"},
+			KeyPatterns: []string{"^anthropic-", "^sk-ant-", "^sk-ant-api03-[a-zA-Z0-9_-]{20,}$"},
 		},
 		{
 			Name:        "github",
 			Category:    "developer",
 			KeyPrefixes: []string{"ghp_", "gho_", "ghu_", "ghs_", "ghr_", "github_pat_"},
-			KeyPatterns: []string{"^(gh[pousr]_[a-zA-Z0-9]{36}|github_pat_[a-zA-Z0-9]{22}_[a-zA-Z0-9]{59})$"},
+			KeyPatterns: []string{"^(gh[pousr]_[a-zA-Z0-9]{36}|github_pat_[a-zA-Z0-9]{20,}_[a-zA-Z0-9]{20,}|ghcr_[a-zA-Z0-9]{36})$"},
 		},
 		{
 			Name:        "stripe",
@@ -34,10 +34,11 @@ func TestDetectProviderFromIndex(t *testing.T) {
 		},
 	}
 
-	prefixes, patterns, _ := BuildDetectionIndex(configs)
+	prefixes, patterns, _, providerPatterns := BuildDetectionIndex(configs)
 	detector := &Detector{
-		prefixes: prefixes,
-		patterns: patterns,
+		prefixes:         prefixes,
+		patterns:         patterns,
+		providerPatterns: providerPatterns,
 	}
 
 	tests := []struct {
@@ -46,14 +47,14 @@ func TestDetectProviderFromIndex(t *testing.T) {
 		category      string
 		expectedMatch string
 	}{
-		{"OpenAI standard key", "sk-abc1234567890abcdefghijklmnopqrstuvwxyz", "", "openai"},
-		{"OpenAI project key", "sk-proj-abc1234567890abcdefghijklmnopqrst", "", "openai"},
+		{"OpenAI standard key", "sk-abc1234567890abcdefghijklmnopqrstuvwxyzabcdef1234", "", "openai"},
+		{"OpenAI project key", "sk-proj-abc1234567890abcdefghijklmnopqrstuvwxyz", "", "openai"},
 		{"Anthropic api03 key - longest prefix wins", "sk-ant-api03-abcdefghijklmnopqrstuvwxyz", "", "anthropic"},
 		{"Anthropic key with full prefix", "anthropic-api-key-12345", "", "anthropic"},
 		{"GitHub PAT", "github_pat_11AAAABBBCCCDDDEEEFF_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "", "github"},
 		{"Stripe live key", "sk_live_abc123def456ghi789jklmno", "", "stripe"},
 		{"Unknown key", "unknown-key-format-12345", "", "unknown"},
-		{"Category filter - LLM with sk-ant", "sk-ant-api03-test", "llm", "anthropic"},
+		{"Category filter - LLM with sk-ant", "sk-ant-api03-abcdefghijklmnopqrstuvwxyz", "llm", "anthropic"},
 		{"Category filter - mismatch", "ghp_testtoken", "payments", "unknown"},
 		{"Empty key", "", "", "unknown"},
 	}
@@ -80,11 +81,11 @@ func TestDetectProvider_PrefixPriority(t *testing.T) {
 		},
 	}
 
-	prefixes, _, _ := BuildDetectionIndex(configs)
-	detector := &Detector{prefixes: prefixes}
+	prefixes, _, _, providerPatterns := BuildDetectionIndex(configs)
+	detector := &Detector{prefixes: prefixes, providerPatterns: providerPatterns}
 
 	result := detector.DetectProvider("sk-proj-somekey", "")
-	// Longer prefix should win when there's a clear winner
+
 	assert.Equal(t, "long-prefix", result, "longer prefix should match first")
 }
 
@@ -102,8 +103,8 @@ func TestDetectProvider_PatternPriority(t *testing.T) {
 		},
 	}
 
-	_, patterns, _ := BuildDetectionIndex(configs)
-	detector := &Detector{patterns: patterns}
+	_, patterns, _, providerPatterns := BuildDetectionIndex(configs)
+	detector := &Detector{patterns: patterns, providerPatterns: providerPatterns}
 
 	result := detector.DetectProvider("sk-proj-abcdefghijk1234567890", "")
 	assert.Equal(t, "specific-pattern", result, "more specific pattern should match first")
@@ -118,11 +119,11 @@ func TestDetectProvider_CompositeKeys(t *testing.T) {
 		},
 	}
 
-	prefixes, patterns, _ := BuildDetectionIndex(configs)
-	detector := &Detector{prefixes: prefixes, patterns: patterns}
+	prefixes, patterns, _, providerPatterns := BuildDetectionIndex(configs)
+	detector := &Detector{prefixes: prefixes, patterns: patterns, providerPatterns: providerPatterns}
 
 	result := detector.DetectProvider("client_id:client_secret", "")
-	// Pattern should match but may return unknown if no prefix
+
 	assert.NotEmpty(t, result)
 }
 
@@ -160,7 +161,7 @@ func TestDetectProvider_LLMSpecificPrefixes(t *testing.T) {
 		{"Fireworks key", "fw_abcdefghijklmnopqrstuvwxyz12345678", "", "fireworks"},
 		{"Replicate key", "r8_abcdefghijklmnopqrstuvwxyz1234567890", "", "replicate"},
 		{"Replicate alt key", "r8_abcdefghijklmnopqrstuvwxyz1234567890ab", "", "replicate"},
-		{"ElevenLabs key", "sk_abcdef0123456789abcdef0123456789", "", "elevenlabs"},
+		{"ElevenLabs key", "1234567890abcdef1234567890abcdef123456", "", "elevenlabs"},
 		{"Replicate actual", "r8_abcdefghijklmnopqrstuvwxyz1234567890", "", "replicate"},
 		{"Mistral key", "mistral-abcdef0123456789abcdef0123456789", "", "mistral"},
 		{"Cohere key", "cohere-abcdefghijklmnopqrstuvwxyz1234567890AB", "", "cohere"},
@@ -197,8 +198,8 @@ func TestDetectProviderWithSuggestion(t *testing.T) {
 	}{
 		{"Known key OpenAI", "sk-proj-abc1234567890abcdefghijklmnopqrstuvwxyz", "", "openai", false},
 		{"Unknown key - should suggest", "random-unknown-key-12345", "", "unknown", true},
-		{"Unique sk-ant key", "sk-ant-test-key", "", "anthropic", false},
-		{"Unique sk-ant with category", "sk-ant-test-key", "llm", "anthropic", false},
+		{"Unique sk-ant key", "sk-ant-test-key-long-enough-for-pattern", "", "anthropic", false},
+		{"Unique sk-ant with category", "sk-ant-test-key-long-enough-for-pattern", "llm", "anthropic", false},
 	}
 
 	for _, tt := range tests {
@@ -216,11 +217,9 @@ func TestDetectProvider_SuggestionsContent(t *testing.T) {
 	configs, _ := LoadProviderConfigs()
 	detector := NewDetectorFromConfigs(configs)
 
-	// Test that suggestions contain relevant providers for sk- keys
 	result := detector.DetectProviderWithSuggestion("random-unknown-key", "")
 	assert.Equal(t, "unknown", result.Provider)
 
-	// Should have suggestions based on common prefixes
 	assert.GreaterOrEqual(t, len(result.Suggestions), 0, "should have suggestions array")
 }
 
@@ -238,12 +237,9 @@ func TestDetectProvider_AmbiguousPrefix(t *testing.T) {
 		},
 	}
 
-	prefixes, _, _ := BuildDetectionIndex(configs)
-	detector := &Detector{prefixes: prefixes}
+	prefixes, patterns, _, providerPatterns := BuildDetectionIndex(configs)
+	detector := &Detector{prefixes: prefixes, patterns: patterns, providerPatterns: providerPatterns}
 
-	// test-abc-xxx matches provider-a (longest prefix test-abc-)
-	// test-xyz-xxx matches provider-b (longest prefix test-xyz-)
-	// test-xxx matches both test-abc- and test-xyz- with same length - should be unknown
 	result := detector.DetectProviderWithSuggestion("test-xyz-abc", "")
 	assert.Equal(t, "provider-b", result.Provider)
 }
@@ -274,20 +270,19 @@ func TestDetectProvider_CaseInsensitivePrefix(t *testing.T) {
 	configs, _ := LoadProviderConfigs()
 	detector := NewDetectorFromConfigs(configs)
 
-	// Test that detection works regardless of case
 	tests := []struct {
 		name string
 		key  string
 	}{
-		{"Uppercase SK-", "SK-ABC123"},
-		{"Mixed case Sk-", "Sk-ABC123"},
-		{"Lowercase sk-", "sk-abc123"},
+		{"Uppercase SK-", "SK-ABC12345678901234567890123456789"},
+		{"Mixed case Sk-", "Sk-ABC12345678901234567890123456789"},
+		{"Lowercase sk-", "sk-abc12345678901234567890123456789"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := detector.DetectProvider(tt.key, "")
-			// Should match openai (sk- prefix) or return unknown if not valid format
+
 			assert.NotEmpty(t, result)
 		})
 	}

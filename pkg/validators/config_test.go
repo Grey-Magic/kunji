@@ -58,7 +58,7 @@ func TestBuildDetectionIndex(t *testing.T) {
 		},
 	}
 
-	prefixes, patterns := BuildDetectionIndex(configs)
+	prefixes, patterns, _, _ := BuildDetectionIndex(configs)
 
 	assert.Greater(t, len(prefixes), 0, "should have prefix entries")
 	assert.Greater(t, len(patterns), 0, "should have pattern entries")
@@ -83,7 +83,7 @@ func TestBuildDetectionIndex_InvalidRegex(t *testing.T) {
 		},
 	}
 
-	prefixes, patterns := BuildDetectionIndex(configs)
+	prefixes, patterns, _, _ := BuildDetectionIndex(configs)
 
 	assert.Empty(t, prefixes)
 	assert.Len(t, patterns, 1, "should skip invalid regex and keep valid one")
@@ -113,7 +113,6 @@ func TestSortPatternsBySpecificity(t *testing.T) {
 
 	sortPatternsBySpecificity(entries)
 
-	// Longer/more specific regex patterns should come first
 	assert.Equal(t, "p3", entries[0].Provider, "most specific first")
 }
 
@@ -138,4 +137,15 @@ func TestProviderConfigEmbedded(t *testing.T) {
 			assert.Greater(t, len(configs), 0, "should parse at least one provider")
 		})
 	}
+}
+
+func TestLoadProviderConfigs_Caching(t *testing.T) {
+
+	configs1, err := LoadProviderConfigs()
+	require.NoError(t, err)
+
+	configs2, err := LoadProviderConfigs()
+	require.NoError(t, err)
+
+	assert.Equal(t, len(configs1), len(configs2), "cached configs should have same length")
 }
