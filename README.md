@@ -11,14 +11,12 @@
 **Universal API Key Validation Engine**
 
 [![Go](https://img.shields.io/badge/Go-1.21%2B-00ADD8?style=flat-square&logo=go)](https://golang.org)
-[![Version](https://img.shields.io/badge/Version-1.0.5-magenta?style=flat-square)](https://github.com/Grey-Magic/kunji/releases)
+[![Version](https://img.shields.io/badge/Version-1.0.6-magenta?style=flat-square)](https://github.com/Grey-Magic/kunji/releases)
 [![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey?style=flat-square)](#installation)
 [![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)](LICENSE)
 
 <p align="center">
-  <a href="#features">Features</a> •
   <a href="#installation">Installation</a> •
-  <a href="#usage">Usage</a> •
   <a href="#security">Security</a> •
   <a href="#supported-providers">Providers</a> •
   <a href="./USAGE.md">Full Manual</a>
@@ -152,8 +150,6 @@ Adding a new provider is simple and requires **zero Go code**. Simply add a YAML
     url: "https://api.newservice.com/v1/user"
     auth: "bearer"
 ```
-
-See [**AGENTS.md**](./AGENTS.md) for full development guidelines.
 
 ## 📄 License
 
