@@ -1,3 +1,24 @@
+- name: aws
+  category: infrastructure
+  key_prefixes: ["AKIA", "ASIA", "AGPA", "AROA", "AIPA", "ANPA", "ANVA"]
+  key_patterns: ["^(AKIA|ASIA|AGPA|AROA|AIPA|ANPA|ANVA)[0-9A-Z]{16}$"]
+  validation:
+    method: GET
+    url: "https://sts.amazonaws.com/?Action=GetCallerIdentity&Version=2011-06-15"
+    auth: "aws_sigv4"
+
+- name: brevo
+  category: email
+  key_prefixes: ["xkeysib-"]
+  key_patterns: ["^xkeysib-[a-zA-Z0-9_-]{64,120}$"]
+  validation:
+    method: GET
+    url: "https://api.brevo.com/v3/account"
+    auth: "header:api-key"
+  metadata_from_validation:
+    email_path: "email"
+    name_path: "companyName"
+
 - name: sendgrid
   category: email
   key_prefixes: ["SG."]
@@ -163,8 +184,8 @@
 
 - name: twilio
   category: communication
-  key_prefixes: ["AC"]
-  key_patterns: ["(?i)^AC[a-f0-9]{32}:[a-f0-9]{32}$"]
+  key_prefixes: ["AC", "SK"]
+  key_patterns: ["(?i)^AC[a-f0-9]{32}:[a-f0-9]{32}$", "^SK[0-9a-fA-F]{32}$"]
   validation:
     method: GET
     url: "https://api.twilio.com/2010-04-01/Accounts/{{key.client_id}}.json"
@@ -193,7 +214,7 @@
 - name: pagerduty
   category: monitoring
   key_prefixes: ["u+"]
-  key_patterns: ["^[a-zA-Z0-9_\\-\\+]{20}$"]
+  key_patterns: ["^[a-z]{1}\\+[a-zA-Z]{9}\\-[a-z]{2}\\-[a-z0-9]{5}$", "^[a-zA-Z0-9_\\-\\+]{20}$"]
   validation:
     method: GET
     url: "https://api.pagerduty.com/users/me"
@@ -207,7 +228,7 @@
 
 - name: asana
   category: productivity
-  key_patterns: ["^1/[0-9]+:[a-zA-Z0-9]{32,64}$"]
+  key_patterns: ["^[0-9]+/[0-9]+:[a-zA-Z0-9]{32,}$"]
   validation:
     method: GET
     url: "https://app.asana.com/api/1.0/users/me"
@@ -256,8 +277,8 @@
 
 - name: supabase
   category: database
-  key_prefixes: ["sbp_"]
-  key_patterns: ["^sbp_[a-zA-Z0-9]{40}$"]
+  key_prefixes: ["sbp_", "eyJ"]
+  key_patterns: ["^sbp_[a-zA-Z0-9]{40}$", "^eyJ[A-Za-z0-9-_=]{300,}$"]
   validation:
     method: GET
     url: "https://api.supabase.com/v1/projects"
@@ -267,7 +288,7 @@
 
 - name: saucelabs
   category: infrastructure
-  key_patterns: ["^[a-zA-Z0-9_-]+:[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$"]
+  key_patterns: ["^[a-zA-Z0-9_-]+:[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$", "^oauth-[a-z0-9]{8,}-[a-z0-9]{5}$"]
   validation:
     method: GET
     url: "https://saucelabs.com/rest/v1/users/{{key.client_id}}"
@@ -279,7 +300,7 @@
 - name: hubspot
   category: marketing
   key_prefixes: ["pat-", "hapikey"]
-  key_patterns: ["^pat-na1-[a-f0-9-]{36,}$", "^hapikey[0-9a-zA-Z]{8,}$"]
+  key_patterns: ["^pat-[a-zA-Z0-9_-]{32,128}$", "^hapikey[0-9a-zA-Z]{8,}$"]
   validation:
     method: GET
     url: "https://api.hubapi.com/owners/v2/owners"
@@ -314,7 +335,7 @@
 
 - name: browserstack
   category: infrastructure
-  key_patterns: ["^[a-zA-Z0-9]+:[a-zA-Z0-9]{20}$"]
+  key_patterns: ["^[a-zA-Z0-9]+:[a-zA-Z0-9]{20}$", "^[A-Za-z0-9]{40}$"]
   validation:
     method: GET
     url: "https://api.browserstack.com/automate/plan.json"
@@ -358,7 +379,7 @@
 - name: google_maps
   category: api
   key_prefixes: ["AIza"]
-  key_patterns: ["^AIza[0-9A-Za-z_-]{35}$"]
+  key_patterns: ["^AIza[0-9A-Za-z_-]{30,}$"]
   validation:
     method: GET
     url: "https://maps.googleapis.com/maps/api/geocode/json?latlng=40,30&key={{key}}"
@@ -369,7 +390,7 @@
 - name: google_geocoding
   category: api
   key_prefixes: ["AIza"]
-  key_patterns: ["^AIza[0-9A-Za-z_-]{35}$"]
+  key_patterns: ["^AIza[0-9A-Za-z_-]{30,}$"]
   validation:
     method: GET
     url: "https://maps.googleapis.com/maps/api/geocode/json?address=1600+Amphitheatre+Parkway&key={{key}}"
@@ -380,7 +401,7 @@
 - name: google_elevation
   category: api
   key_prefixes: ["AIza"]
-  key_patterns: ["^AIza[0-9A-Za-z_-]{35}$"]
+  key_patterns: ["^AIza[0-9A-Za-z_-]{30,}$"]
   validation:
     method: GET
     url: "https://maps.googleapis.com/maps/api/elevation/json?locations=39739,-104.990&key={{key}}"
@@ -391,7 +412,7 @@
 - name: google_distance_matrix
   category: api
   key_prefixes: ["AIza"]
-  key_patterns: ["^AIza[0-9A-Za-z_-]{35}$"]
+  key_patterns: ["^AIza[0-9A-Za-z_-]{30,}$"]
   validation:
     method: GET
     url: "https://maps.googleapis.com/maps/api/distancematrix/json?origins=40,74&destinations=40.71,-74.00&key={{key}}"
@@ -402,7 +423,7 @@
 - name: google_places
   category: api
   key_prefixes: ["AIza"]
-  key_patterns: ["^AIza[0-9A-Za-z_-]{35}$"]
+  key_patterns: ["^AIza[0-9A-Za-z_-]{30,}$"]
   validation:
     method: GET
     url: "https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=40.7,-74.0&radius=500&key={{key}}"
@@ -413,7 +434,7 @@
 - name: google_timezone
   category: api
   key_prefixes: ["AIza"]
-  key_patterns: ["^AIza[0-9A-Za-z_-]{35}$"]
+  key_patterns: ["^AIza[0-9A-Za-z_-]{30,}$"]
   validation:
     method: GET
     url: "https://maps.googleapis.com/maps/api/timezone/json?location=39.739,-104.990&timestamp=1331766000&key={{key}}"
@@ -424,7 +445,7 @@
 - name: google_directions
   category: api
   key_prefixes: ["AIza"]
-  key_patterns: ["^AIza[0-9A-Za-z_-]{35}$"]
+  key_patterns: ["^AIza[0-9A-Za-z_-]{30,}$"]
   validation:
     method: GET
     url: "https://maps.googleapis.com/maps/api/directions/json?origin=40.7,-74.0&destination=40.71,-74.00&key={{key}}"
@@ -435,7 +456,7 @@
 - name: google_translate
   category: api
   key_prefixes: ["AIza"]
-  key_patterns: ["^AIza[0-9A-Za-z_-]{35}$"]
+  key_patterns: ["^AIza[0-9A-Za-z_-]{30,}$"]
   validation:
     method: GET
     url: "https://translation.googleapis.com/language/translate/v2/languages?key={{key}}"
@@ -446,7 +467,7 @@
 - name: google_firebase
   category: api
   key_prefixes: ["AIza"]
-  key_patterns: ["^AIza[0-9A-Za-z_-]{35}$"]
+  key_patterns: ["^AIza[0-9A-Za-z_-]{30,}$"]
   validation:
     method: GET
     url: "https://www.googleapis.com/identitytoolkit/v3/relyingparty/getProjectConfig?key={{key}}"
@@ -457,7 +478,7 @@
 - name: google_sheets
   category: api
   key_prefixes: ["AIza"]
-  key_patterns: ["^AIza[0-9A-Za-z_-]{35}$"]
+  key_patterns: ["^AIza[0-9A-Za-z_-]{30,}$"]
   validation:
     method: GET
     url: "https://sheets.googleapis.com/v4/spreadsheets?key={{key}}"
@@ -468,7 +489,7 @@
 - name: google_custom_search
   category: api
   key_prefixes: ["AIza"]
-  key_patterns: ["^AIza[0-9A-Za-z_-]{35}$"]
+  key_patterns: ["^AIza[0-9A-Za-z_-]{30,}$"]
   validation:
     method: GET
     url: "https://www.googleapis.com/customsearch/v1?key={{key}}&cx=017576662512468230146:omuauf_lfve&q=test"
@@ -479,7 +500,7 @@
 - name: google_pagespeed
   category: api
   key_prefixes: ["AIza"]
-  key_patterns: ["^AIza[0-9A-Za-z_-]{35}$"]
+  key_patterns: ["^AIza[0-9A-Za-z_-]{30,}$"]
   validation:
     method: GET
     url: "https://www.googleapis.com/pagespeedonline/v5/runPagespeed?key={{key}}&url=https://example.com"
@@ -490,7 +511,7 @@
 - name: google_geolocate
   category: api
   key_prefixes: ["AIza"]
-  key_patterns: ["^AIza[0-9A-Za-z_-]{35}$"]
+  key_patterns: ["^AIza[0-9A-Za-z_-]{30,}$"]
   validation:
     method: POST
     url: "https://www.googleapis.com/geolocation/v1/geolocate?key={{key}}"
@@ -502,7 +523,7 @@
 - name: google_books
   category: api
   key_prefixes: ["AIza"]
-  key_patterns: ["^AIza[0-9A-Za-z_-]{35}$"]
+  key_patterns: ["^AIza[0-9A-Za-z_-]{30,}$"]
   validation:
     method: GET
     url: "https://www.googleapis.com/books/v1/volumes?q=harry+potter&maxResults=1&key={{key}}"
@@ -513,7 +534,7 @@
 - name: google_safe_browsing
   category: security
   key_prefixes: ["AIza"]
-  key_patterns: ["^AIza[0-9A-Za-z_-]{35}$"]
+  key_patterns: ["^AIza[0-9A-Za-z_-]{30,}$"]
   validation:
     method: POST
     url: "https://safebrowsing.googleapis.com/v4/threatMatches:find?key={{key}}"
@@ -525,7 +546,7 @@
 - name: google_recaptcha_enterprise
   category: security
   key_prefixes: ["AIza"]
-  key_patterns: ["^AIza[0-9A-Za-z_-]{35}$"]
+  key_patterns: ["^AIza[0-9A-Za-z_-]{30,}$"]
   validation:
     method: POST
     url: "https://recaptchaenterprise.googleapis.com/v1/projects/-/assessment?key={{key}}"
@@ -535,7 +556,7 @@
 - name: google_cloud_tasks
   category: api
   key_prefixes: ["AIza"]
-  key_patterns: ["^AIza[0-9A-Za-z_-]{35}$"]
+  key_patterns: ["^AIza[0-9A-Za-z_-]{30,}$"]
   validation:
     method: GET
     url: "https://cloudtasks.googleapis.com/v2/projects/-/locations/-/queues?key={{key}}"
@@ -544,7 +565,7 @@
 - name: google_cloud_build
   category: devops
   key_prefixes: ["AIza"]
-  key_patterns: ["^AIza[0-9A-Za-z_-]{35}$"]
+  key_patterns: ["^AIza[0-9A-Za-z_-]{30,}$"]
   validation:
     method: GET
     url: "https://cloudbuild.googleapis.com/v1/projects/-/builds?key={{key}}"
@@ -553,7 +574,7 @@
 - name: google_cloud_storage
   category: api
   key_prefixes: ["AIza"]
-  key_patterns: ["^AIza[0-9A-Za-z_-]{35}$"]
+  key_patterns: ["^AIza[0-9A-Za-z_-]{30,}$"]
   validation:
     method: GET
     url: "https://storage.googleapis.com/storage/v1/b?key={{key}}"
@@ -562,7 +583,7 @@
 - name: google_cloud_functions
   category: api
   key_prefixes: ["AIza"]
-  key_patterns: ["^AIza[0-9A-Za-z_-]{35}$"]
+  key_patterns: ["^AIza[0-9A-Za-z_-]{30,}$"]
   validation:
     method: GET
     url: "https://cloudfunctions.googleapis.com/v1/projects/-/locations/-/functions?key={{key}}"
@@ -571,7 +592,7 @@
 - name: google_cloud_run
   category: api
   key_prefixes: ["AIza"]
-  key_patterns: ["^AIza[0-9A-Za-z_-]{35}$"]
+  key_patterns: ["^AIza[0-9A-Za-z_-]{30,}$"]
   validation:
     method: GET
     url: "https://run.googleapis.com/v1/namespaces/-/services?key={{key}}"
@@ -580,7 +601,7 @@
 - name: google_dialogflow
   category: api
   key_prefixes: ["AIza"]
-  key_patterns: ["^AIza[0-9A-Za-z_-]{35}$"]
+  key_patterns: ["^AIza[0-9A-Za-z_-]{30,}$"]
   validation:
     method: GET
     url: "https://dialogflow.googleapis.com/v3/projects?key={{key}}"
@@ -589,7 +610,7 @@
 - name: google_cloud_vision
   category: api
   key_prefixes: ["AIza"]
-  key_patterns: ["^AIza[0-9A-Za-z_-]{35}$"]
+  key_patterns: ["^AIza[0-9A-Za-z_-]{30,}$"]
   validation:
     method: POST
     url: "https://vision.googleapis.com/v1/images:annotate?key={{key}}"
@@ -599,7 +620,7 @@
 - name: google_cloud_speech
   category: api
   key_prefixes: ["AIza"]
-  key_patterns: ["^AIza[0-9A-Za-z_-]{35}$"]
+  key_patterns: ["^AIza[0-9A-Za-z_-]{30,}$"]
   validation:
     method: POST
     url: "https://speech.googleapis.com/v1/operations?key={{key}}"
@@ -609,7 +630,7 @@
 - name: google_cloud_natural_language
   category: api
   key_prefixes: ["AIza"]
-  key_patterns: ["^AIza[0-9A-Za-z_-]{35}$"]
+  key_patterns: ["^AIza[0-9A-Za-z_-]{30,}$"]
   validation:
     method: POST
     url: "https://language.googleapis.com/v1/documents:analyzeEntities?key={{key}}"
@@ -619,7 +640,7 @@
 - name: google_cloud_video_intelligence
   category: api
   key_prefixes: ["AIza"]
-  key_patterns: ["^AIza[0-9A-Za-z_-]{35}$"]
+  key_patterns: ["^AIza[0-9A-Za-z_-]{30,}$"]
   validation:
     method: POST
     url: "https://videointelligence.googleapis.com/v1/videoIntelligenceServiceClient:annotate?key={{key}}"
@@ -629,7 +650,7 @@
 - name: google_cloud_ml
   category: api
   key_prefixes: ["AIza"]
-  key_patterns: ["^AIza[0-9A-Za-z_-]{35}$"]
+  key_patterns: ["^AIza[0-9A-Za-z_-]{30,}$"]
   validation:
     method: GET
     url: "https://ml.googleapis.com/v1/projects?key={{key}}"
@@ -638,7 +659,7 @@
 - name: google_cloud_monitoring
   category: api
   key_prefixes: ["AIza"]
-  key_patterns: ["^AIza[0-9A-Za-z_-]{35}$"]
+  key_patterns: ["^AIza[0-9A-Za-z_-]{30,}$"]
   validation:
     method: GET
     url: "https://monitoring.googleapis.com/v3/projects?key={{key}}"
@@ -647,7 +668,7 @@
 - name: google_cloud_logging
   category: api
   key_prefixes: ["AIza"]
-  key_patterns: ["^AIza[0-9A-Za-z_-]{35}$"]
+  key_patterns: ["^AIza[0-9A-Za-z_-]{30,}$"]
   validation:
     method: GET
     url: "https://logging.googleapis.com/v2/projects?key={{key}}"
@@ -656,7 +677,7 @@
 - name: google_cloud_pubsub
   category: api
   key_prefixes: ["AIza"]
-  key_patterns: ["^AIza[0-9A-Za-z_-]{35}$"]
+  key_patterns: ["^AIza[0-9A-Za-z_-]{30,}$"]
   validation:
     method: GET
     url: "https://pubsub.googleapis.com/v1/projects?key={{key}}"
@@ -665,7 +686,7 @@
 - name: google_cloud_datastore
   category: api
   key_prefixes: ["AIza"]
-  key_patterns: ["^AIza[0-9A-Za-z_-]{35}$"]
+  key_patterns: ["^AIza[0-9A-Za-z_-]{30,}$"]
   validation:
     method: POST
     url: "https://datastore.googleapis.com/v1/projects?key={{key}}"
@@ -675,7 +696,7 @@
 - name: google_cloud_firestore
   category: api
   key_prefixes: ["AIza"]
-  key_patterns: ["^AIza[0-9A-Za-z_-]{35}$"]
+  key_patterns: ["^AIza[0-9A-Za-z_-]{30,}$"]
   validation:
     method: GET
     url: "https://firestore.googleapis.com/v1/projects?key={{key}}"
@@ -684,7 +705,7 @@
 - name: google_cloud_container
   category: devops
   key_prefixes: ["AIza"]
-  key_patterns: ["^AIza[0-9A-Za-z_-]{35}$"]
+  key_patterns: ["^AIza[0-9A-Za-z_-]{30,}$"]
   validation:
     method: GET
     url: "https://container.googleapis.com/v1/projects?key={{key}}"
@@ -693,7 +714,7 @@
 - name: google_cloud_kms
   category: security
   key_prefixes: ["AIza"]
-  key_patterns: ["^AIza[0-9A-Za-z_-]{35}$"]
+  key_patterns: ["^AIza[0-9A-Za-z_-]{30,}$"]
   validation:
     method: GET
     url: "https://cloudkms.googleapis.com/v1/projects?key={{key}}"
@@ -702,7 +723,7 @@
 - name: google_cloud_iam
   category: api
   key_prefixes: ["AIza"]
-  key_patterns: ["^AIza[0-9A-Za-z_-]{35}$"]
+  key_patterns: ["^AIza[0-9A-Za-z_-]{30,}$"]
   validation:
     method: GET
     url: "https://iam.googleapis.com/v1/projects?key={{key}}"
@@ -711,7 +732,7 @@
 - name: google_cloud_resource_manager
   category: api
   key_prefixes: ["AIza"]
-  key_patterns: ["^AIza[0-9A-Za-z_-]{35}$"]
+  key_patterns: ["^AIza[0-9A-Za-z_-]{30,}$"]
   validation:
     method: GET
     url: "https://cloudresourcemanager.googleapis.com/v1/projects?key={{key}}"
@@ -720,7 +741,7 @@
 - name: google_cloud_billing
   category: api
   key_prefixes: ["AIza"]
-  key_patterns: ["^AIza[0-9A-Za-z_-]{35}$"]
+  key_patterns: ["^AIza[0-9A-Za-z_-]{30,}$"]
   validation:
     method: GET
     url: "https://cloudbilling.googleapis.com/v1/projects?key={{key}}"
@@ -765,7 +786,8 @@
 
 - name: deviantart_token
   category: api
-  key_patterns: ["^[a-zA-Z0-9-_]{30,50}$"]
+  key_prefixes: ["AT_"]
+  key_patterns: ["^[a-zA-Z0-9-_]{30,50}$", "^AT_[A-Za-z0-9_-]{80}$"]
   validation:
     method: GET
     url: "https://www.deviantart.com/api/v1/user/whoami"
@@ -796,7 +818,8 @@
 - name: mailgun
   category: email
   key_prefixes: ["key-"]
-  key_patterns: ["^key-[a-f0-9]{48}$"]
+  key_patterns: ["^key-[0-9a-zA-Z]{32}$", "^[a-zA-Z0-9]{72}$"]
+
   validation:
     method: GET
     url: "https://api.mailgun.net/v4/domains"
@@ -863,7 +886,7 @@
 - name: bitly
   category: api
   key_prefixes: ["BITL"]
-  key_patterns: ["^[a-zA-Z0-9_-]{34,45}$"]
+  key_patterns: ["^[a-zA-Z0-9_-]{34,45}$", "^[a-zA-Z0-9]{40}$"]
   validation:
     method: GET
     url: "https://api-ssl.bitly.com/v3/shorten"
@@ -1006,7 +1029,7 @@
 - name: gitlab
   category: developer
   key_prefixes: ["glpat-"]
-  key_patterns: ["^glpat-[a-zA-Z0-9_-]{20}$"]
+  key_patterns: ["^glpat-[a-zA-Z0-9_-]{20,22}$"]
   validation:
     method: GET
     url: "https://gitlab.com/api/v4/user"
@@ -1018,7 +1041,7 @@
 - name: razorpay
   category: payments
   key_prefixes: ["rzp_live_"]
-  key_patterns: ["^rzp_live_[a-zA-Z0-9]{14}:[a-zA-Z0-9]{24}$"]
+  key_patterns: ["^rzp_live_[a-zA-Z0-9]{14}:[a-zA-Z0-9]{24}$", "^rzp_live_[a-zA-Z0-9]{14}$"]
   validation:
     method: GET
     url: "https://api.razorpay.com/v1/payments"
@@ -1065,7 +1088,7 @@
 
 - name: azure_app_insights
   category: monitoring
-  key_patterns: ["^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}:[a-zA-Z0-9]{32,40}$"]
+  key_patterns: ["^[a-f0-9]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(:[a-zA-Z0-9]{32,40})?$", "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"]
   validation:
     method: GET
     url: "https://api.applicationinsights.io/v1/apps/{{key.client_id}}/metrics/requests/count"
@@ -1076,7 +1099,7 @@
 - name: youtube
   category: api
   key_prefixes: ["AIza"]
-  key_patterns: ["^AIza[0-9A-Za-z_-]{35}$"]
+  key_patterns: ["^AIza[0-9A-Za-z_-]{30,}$"]
   validation:
     method: GET
     url: "https://www.googleapis.com/youtube/v3/activities?part=contentDetails&maxResults=1&channelId=UC-lHJZR3Gqxm24_Vd_AJ5Yw&key={{key}}"
@@ -1140,8 +1163,9 @@
     body: "grant_type=client_credentials&client_id={{key.client_id}}&client_secret={{key.secret}}"
 
 - name: bing_maps
-  category: maps
-  key_patterns: ["^[a-zA-Z0-9_-]{64}$"]
+  category: api
+  key_patterns: ["^[A-Za-z0-9]{32}$"]
+
   validation:
     method: GET
     url: "https://dev.virtualearth.net/REST/v1/Locations?CountryRegion=US&adminDistrict=WA&locality=Somewhere&postalCode=98001&addressLine=100%20Main%20St.&key={{key}}"
@@ -1253,8 +1277,8 @@
 
 - name: digitalocean
   category: cloud
-  key_prefixes: ["dop_v1_"]
-  key_patterns: ["^dop_v1_[a-f0-9]{64}$"]
+  key_prefixes: ["dop_v1_", "do_pat_"]
+  key_patterns: ["^dop_v1_[a-f0-9]{64}$", "^do_pat_[a-f0-9]{64}$", "^[a-zA-Z0-9_-]{64}$"]
   validation:
     method: GET
     url: "https://api.digitalocean.com/v2/account"
@@ -1276,7 +1300,7 @@
 
 - name: censys
   category: security
-  key_patterns: ["^[a-zA-Z0-9]{50,}$"]
+  key_patterns: ["^[a-zA-Z0-9]{50,}$", "^[a-zA-Z0-9]{32}$"]
   validation:
     method: GET
     url: "https://api.censys.io/v3/account"
@@ -1287,7 +1311,7 @@
 
 - name: discord
   category: communication
-  key_patterns: ["^MFI[a-zA-Z0-9]{20,}$"]
+  key_patterns: ["^[MN][A-Za-z\\d]{23}\\.[\\w-]{6}\\.[\\w-]{27,39}$"]
   validation:
     method: GET
     url: "https://discord.com/api/v10/users/@me"
@@ -1298,7 +1322,8 @@
 
 - name: slack
   category: communication
-  key_patterns: ["^xoxb-[a-zA-Z0-9-]+$"]
+  key_prefixes: ["xoxb-", "xoxp-", "xoxa-", "xoxr-"]
+  key_patterns: ["^xox[baprs]-[0-9a-zA-Z]{10,48}$", "^xoxb-[0-9]{11}-[0-9]{11}-[0-9a-zA-Z]{24}$", "^xoxp-[0-9]{11}-[0-9]{11}-[0-9a-zA-Z]{24}$"]
   validation:
     method: GET
     url: "https://slack.com/api/auth.test"
@@ -1378,7 +1403,8 @@
 - name: planetscale
   category: database
   key_prefixes: ["pscale_"]
-  key_patterns: ["^pscale_[a-zA-Z0-9_-]{30,}$"]
+  key_patterns: ["^pscale_[A-Za-z0-9-_]{36}$"]
+
   validation:
     method: GET
     url: "https://api.planetscale.com/v1/organizations"
@@ -1412,7 +1438,7 @@
 - name: pinecone
   category: ai
   key_prefixes: ["pc-", "pinecone_"]
-  key_patterns: ["^pc-[a-z0-9-]{36}$", "^pinecone_[a-zA-Z0-9_-]{30,}$"]
+  key_patterns: ["^pc-[a-z0-9-]{36}$", "^pinecone_[a-zA-Z0-9_-]{30,}$", "^[A-Za-z0-9]{50}$"]
   validation:
     method: GET
     url: "https://api.pinecone.io/actions/whoami"
@@ -1431,8 +1457,9 @@
 
 - name: langsmith
   category: ai
-  key_prefixes: ["ls-"]
-  key_patterns: ["^ls-[a-zA-Z0-9_-]{20,}$"]
+  key_prefixes: ["lsv2_"]
+  key_patterns: ["^lsv2_[A-Za-z0-9-_]{36}$"]
+
   validation:
     method: GET
     url: "https://api.smith.langchain.com/user_info"
@@ -1442,8 +1469,9 @@
 
 - name: langfuse
   category: ai
-  key_prefixes: ["lf-"]
-  key_patterns: ["^lf-[a-zA-Z0-9_-]{20,}$"]
+  key_prefixes: ["pk-lf-"]
+  key_patterns: ["^pk-lf-[0-9]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"]
+
   validation:
     method: GET
     url: "https://api.langfuse.com/api/public/project"
@@ -1498,7 +1526,7 @@
 - name: discord_bot
   category: communication
   key_prefixes: ["Bot "]
-  key_patterns: ["^Bot[a-zA-Z0-9._-]{60,}$"]
+  key_patterns: ["^Bot [a-zA-Z0-9._-]{50,}$"]
   validation:
     method: GET
     url: "https://discord.com/api/v10/users/@me"
@@ -1597,8 +1625,8 @@
 
 - name: chargebee
   category: payments
-  key_prefixes: []
-  key_patterns: ["^[a-zA-Z0-9.-]+:chargebee_[a-zA-Z0-9_-]+$"]
+  key_prefixes: ["sk_"]
+  key_patterns: ["^[a-zA-Z0-9.-]+:chargebee_[a-zA-Z0-9_-]+$", "^sk_[a-zA-Z0-9]{32,88}$"]
   validation:
     method: GET
     url: "https://{{key.client_id}}.chargebee.com/api/v2/subscriptions"
@@ -1607,8 +1635,8 @@
 
 - name: gitlab_ci
   category: devops
-  key_prefixes: ["glcbt-"]
-  key_patterns: ["^glcbt-[a-zA-Z0-9_-]{20,}$"]
+  key_prefixes: ["glcbt-", "glpat-"]
+  key_patterns: ["^glcbt-[a-zA-Z0-9_-]{20,}$", "^glpat-[A-Za-z0-9-_]{20}$"]
   validation:
     method: GET
     url: "https://gitlab.com/api/v4/user"
@@ -1732,8 +1760,8 @@
 
 - name: clickhouse
   category: database
-  key_prefixes: []
-  key_patterns: ["^[a-zA-Z0-9.-]+:clickhouse_[a-zA-Z0-9_-]+$"]
+  key_prefixes: ["default:"]
+  key_patterns: ["^[a-zA-Z0-9.-]+:clickhouse_[a-zA-Z0-9_-]+$", "^default:[A-Za-z0-9+/=]{88}$"]
   validation:
     method: GET
     url: "https://{{key.client_id}}.clickhouse.cloud/api/v2/clusters"
@@ -1742,7 +1770,7 @@
 - name: influxdb
   category: database
   key_prefixes: ["influxdb_"]
-  key_patterns: ["^influxdb[a-zA-Z0-9_-]{20,}$"]
+  key_patterns: ["^[A-Za-z0-9]{40}$", "^[a-zA-Z0-9_-]{64,128}$", "^influxdb[a-zA-Z0-9_-]{20,}$"]
   validation:
     method: GET
     url: "https://us-west-2-1.aws.cloud2.influxdata.com/api/v2/buckets"
@@ -1752,8 +1780,7 @@
 
 - name: cloudflare_r2
   category: storage
-  key_prefixes: []
-  key_patterns: ["^[a-zA-Z0-9-]+:r2_[a-zA-Z0-9_-]{20,}$"]
+  key_patterns: ["^[a-zA-Z0-9-]+:r2_[a-zA-Z0-9_-]{20,}$", "^[A-Za-z0-9]{32}$"]
   validation:
     method: GET
     url: "https://{{key.client_id}}.r2.cloudflarestorage.com"
@@ -1762,8 +1789,9 @@
 
 - name: linear
   category: productivity
-  key_prefixes: ["lin_api_"]
-  key_patterns: ["^lin_api_[a-zA-Z0-9_-]{20,}$"]
+  key_prefixes: ["linapi_", "lin_api_"]
+  key_patterns: ["^linapi_[A-Za-z0-9-_]{28}$", "^lin_api_[0-9A-Za-z]{40}$"]
+
   validation:
     method: GET
     url: "https://api.linear.app/graphql"
@@ -1909,7 +1937,7 @@
 - name: coingecko
   category: blockchain
   key_prefixes: ["CG-"]
-  key_patterns: ["^CG-[a-zA-Z0-9_-]{20,}$"]
+  key_patterns: ["^CG-[A-Za-z0-9]{64}$"]
   validation:
     method: GET
     url: "https://api.coingecko.com/api/v3/ping"
@@ -1983,7 +2011,7 @@
 - name: algolia_search
   category: search
   key_prefixes: ["algolia_"]
-  key_patterns: ["^algolia[a-zA-Z0-9_-]{20,}:[a-zA-Z0-9_-]{20,}$"]
+  key_patterns: ["^[A-Za-z0-9_-]{32,40}$"]
   validation:
     method: GET
     url: "https://{{key.client_id}}.algolia.net/1/indexes"
@@ -2093,8 +2121,8 @@
 
 - name: checkmarx
   category: security
-  key_prefixes: []
-  key_patterns: ["^[a-zA-Z0-9.-]+:cx_[a-zA-Z0-9_-]+$"]
+  key_prefixes: ["cx_"]
+  key_patterns: ["^[a-zA-Z0-9.-]+:cx_[a-zA-Z0-9_-]+$", "^cx_[A-Za-z0-9-_]{36}$"]
   validation:
     method: GET
     url: "https://{{key.client_id}}.checkmarx.net/cxrestapi/auth/validate"
@@ -2114,8 +2142,7 @@
 
 - name: datocms
   category: cms
-  key_prefixes: ["datocms-"]
-  key_patterns: ["^datocms-[a-zA-Z0-9_-]{20,}$"]
+  key_patterns: ["^[A-Za-z0-9]{50}$"]
   validation:
     method: GET
     url: "https://api.datocms.com/v2/me"
@@ -2216,8 +2243,7 @@
 
 - name: confluence
   category: documentation
-  key_prefixes: []
-  key_patterns: ["^[a-zA-Z0-9.-]+:confluence_[a-zA-Z0-9_-]+$"]
+  key_patterns: ["^[a-zA-Z0-9.-]+:confluence_[a-zA-Z0-9_-]+$", "^[A-Za-z0-9+/]{120,200}$"]
   validation:
     method: GET
     url: "https://{{key.client_id}}.atlassian.net/wiki/rest/api/user"
@@ -2244,8 +2270,8 @@
 
 - name: bigcommerce
   category: ecommerce
-  key_prefixes: ["bc_"]
-  key_patterns: ["^bc_[a-zA-Z0-9_-]{20,}$"]
+  key_prefixes: ["bc_", "bc"]
+  key_patterns: ["^bc_[a-zA-Z0-9_-]{20,}$", "^bc[0-9a-f]{32}$"]
   validation:
     method: GET
     url: "https://api.bigcommerce.com/v3/store"
@@ -2255,7 +2281,7 @@
 - name: bitwarden
   category: secrets
   key_prefixes: ["bw_"]
-  key_patterns: ["^bw_[a-zA-Z0-9_-]{20,}$"]
+  key_patterns: ["^bw_[a-zA-Z0-9_-]{20,}$", "^[0-9a-f]{32}$"]
   validation:
     method: GET
     url: "https://api.bitwarden.com/v1/api-keys"
@@ -2348,8 +2374,8 @@
 
 - name: argo_cd
   category: cicd
-  key_prefixes: []
-  key_patterns: ["^[a-zA-Z0-9.-]+:argocd_[a-zA-Z0-9_-]+$"]
+  key_prefixes: ["argo-"]
+  key_patterns: ["^[a-zA-Z0-9.-]+:argocd_[a-zA-Z0-9_-]+$", "^argo-[a-zA-Z0-9]{32,64}$"]
   validation:
     method: GET
     url: "https://{{key.client_id}}/api/v1/session"
@@ -2479,8 +2505,7 @@
 
 - name: dokku
   category: cloud
-  key_prefixes: []
-  key_patterns: ["^[a-zA-Z0-9.-]+:dokku_[a-zA-Z0-9_-]+$"]
+  key_patterns: ["^[a-zA-Z0-9.-]+:dokku_[a-zA-Z0-9_-]+$", "^[A-Za-z0-9]{40}$"]
   validation:
     method: GET
     url: "https://{{key.client_id}}/api/v1/projects"
@@ -2488,8 +2513,7 @@
 
 - name: caprover
   category: cloud
-  key_prefixes: []
-  key_patterns: ["^[a-zA-Z0-9.-]+:caprover_[a-zA-Z0-9_-]+$"]
+  key_patterns: ["^[a-zA-Z0-9.-]+:caprover_[a-zA-Z0-9_-]+$", "^[A-Za-z0-9]{40}$"]
   validation:
     method: GET
     url: "https://{{key.client_id}}/api/v1/projects"
@@ -2498,8 +2522,8 @@
 
 - name: chroma
   category: ai_ml
-  key_prefixes: []
-  key_patterns: ["^[a-zA-Z0-9.-]+:chroma_[a-zA-Z0-9_-]+$"]
+  key_prefixes: ["ch_"]
+  key_patterns: ["^[a-zA-Z0-9.-]+:chroma_[a-zA-Z0-9_-]+$", "^ch_[A-Za-z0-9]{32}$"]
   validation:
     method: GET
     url: "https://{{key.client_id}}.cloud.chroma.io/api/v1/heartbeat"
@@ -2534,8 +2558,8 @@
 
 - name: braintrust
   category: ai_ml
-  key_prefixes: ["bt-"]
-  key_patterns: ["^bt-[a-zA-Z0-9_-]{20,}$"]
+  key_prefixes: ["bt-", "brn_"]
+  key_patterns: ["^bt-[a-zA-Z0-9_-]{20,}$", "^brn_[A-Za-z0-9-_]{32,88}$"]
   validation:
     method: GET
     url: "https://api.braintrustdata.com/v1/project"

@@ -1,7 +1,7 @@
 - name: anthropic
   category: llm
   key_prefixes: ["sk-ant-api03-", "sk-ant-", "anthropic-"]
-  key_patterns: ["^sk-ant-api03-[a-zA-Z0-9_-]{20,}$", "^anthropic-[a-zA-Z0-9_-]{20,}$"]
+  key_patterns: ["^sk-ant-api03-[a-zA-Z0-9_-]{20,}$", "^anthropic-[a-zA-Z0-9_-]{20,}$", "^sk-ant-[a-zA-Z0-9_-]{20,}$"]
   validation:
     method: POST
     url: "https://api.anthropic.com/v1/messages"
@@ -36,7 +36,7 @@
 - name: openrouter
   category: llm
   key_prefixes: ["sk-or-"]
-  key_patterns: ["^sk-or-"]
+  key_patterns: ["^sk-or-[a-zA-Z0-9_-]{20,}$", "^sk-or-[A-Za-z0-9-_]{128}$"]
   validation:
     method: GET
     url: "https://openrouter.ai/api/v1/key"
@@ -48,7 +48,7 @@
 - name: gemini
   category: llm
   key_prefixes: ["AIza"]
-  key_patterns: ["^AIza[a-zA-Z0-9_-]{35}$"]
+  key_patterns: ["^AIza[a-zA-Z0-9_-]{30,}$"]
   validation:
     method: GET
     url: "https://generativelanguage.googleapis.com/v1beta/models?key={{key}}"
@@ -59,7 +59,7 @@
 - name: huggingface
   category: ai
   key_prefixes: ["hf_"]
-  key_patterns: ["^hf_"]
+  key_patterns: ["^hf_[a-zA-Z0-9]{30,}$", "^hf_[A-Za-z0-9]{37}$"]
   validation:
     method: GET
     url: "https://huggingface.co/api/whoami-v2"
@@ -72,7 +72,7 @@
 - name: xai
   category: llm
   key_prefixes: ["xai-"]
-  key_patterns: ["^xai-"]
+  key_patterns: ["^xai-[a-zA-Z0-9_-]{20,}$"]
   validation:
     method: POST
     url: "https://api.x.ai/v1/chat/completions"
@@ -92,7 +92,7 @@
 - name: venice
   category: llm
   key_prefixes: ["venice-"]
-  key_patterns: ["^venice-"]
+  key_patterns: ["^venice-[a-zA-Z0-9_-]{20,}$"]
   validation:
     method: GET
     url: "https://api.venice.ai/api/v1/user"
@@ -104,7 +104,7 @@
 - name: qwen
   category: llm
   key_prefixes: ["sk-qwen-", "sk-dashscope-"]
-  key_patterns: ["^sk-qwen-[a-z0-9]+$", "^sk-dashscope-[a-z0-9]+$"]
+  key_patterns: ["^sk-qwen-[a-z0-9]{20,}$", "^sk-dashscope-[a-z0-9]{20,}$"]
   validation:
     method: POST
     url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions"
@@ -119,7 +119,7 @@
 - name: kimi
   category: llm
   key_prefixes: ["sk-kimi-", "sk-moonshot-"]
-  key_patterns: ["^sk-kimi-[a-zA-Z0-9_-]+$", "^sk-moonshot-[a-zA-Z0-9_-]+$"]
+  key_patterns: ["^sk-kimi-[a-zA-Z0-9_-]{20,}$", "^sk-moonshot-[a-zA-Z0-9_-]{20,}$"]
   validation:
     method: POST
     url: "https://api.moonshot.cn/v1/chat/completions"
@@ -134,7 +134,7 @@
 - name: minimax
   category: llm
   key_prefixes: ["minimax-"]
-  key_patterns: ["^minimax-"]
+  key_patterns: ["^minimax-[a-zA-Z0-9_-]{20,}$"]
   validation:
     method: POST
     url: "https://api.minimax.io/v1/text/chatcompletion_v2"
@@ -164,7 +164,7 @@
 - name: openai
   category: llm
   key_prefixes: ["sk-proj-", "sk-svcacct-"]
-  key_patterns: ["^sk-proj-[a-zA-Z0-9_-]{20,}$", "^sk-svcacct-[a-zA-Z0-9_-]{20,}$", "^sk-[a-zA-Z0-9]{48}$"]
+  key_patterns: ["^sk-proj-[a-zA-Z0-9_-]{20,}$", "^sk-svcacct-[a-zA-Z0-9_-]{20,}$", "^sk-[a-zA-Z0-9]{48}$", "^sk-[A-Za-z0-9]{20}T3BlbkFJ[A-Za-z0-9]{20}$"]
   validation:
     method: POST
     url: "https://api.openai.com/v1/chat/completions"
@@ -197,7 +197,7 @@
 - name: cohere
   category: llm
   key_prefixes: ["cohere-"]
-  key_patterns: ["^cohere-[a-zA-Z0-9_-]{40}$"]
+  key_patterns: ["^cohere-[a-zA-Z0-9_-]{20,}$", "^[A-Za-z0-9]{40}$"]
   validation:
     method: POST
     url: "https://api.cohere.com/v1/check-api-key"
@@ -208,7 +208,7 @@
 - name: perplexity
   category: llm
   key_prefixes: ["pplx-"]
-  key_patterns: ["^pplx-[a-zA-Z0-9]{43}$"]
+  key_patterns: ["^pplx-[a-zA-Z0-9]{20,}$", "^pplx-[A-Za-z0-9-_]{80}$"]
   validation:
     method: POST
     url: "https://api.perplexity.ai/chat/completions"
@@ -218,7 +218,7 @@
 - name: groq
   category: llm
   key_prefixes: ["gsk_"]
-  key_patterns: ["^gsk_[a-zA-Z0-9]{48}$"]
+  key_patterns: ["^gsk_[a-zA-Z0-9]{20,}$", "^gsk_[A-Za-z0-9-_]{88}$"]
   validation:
     method: POST
     url: "https://api.groq.com/openai/v1/chat/completions"
@@ -228,7 +228,7 @@
 - name: together
   category: llm
   key_prefixes: ["together-"]
-  key_patterns: ["^together-[a-f0-9]{64}$"]
+  key_patterns: ["^together-[a-f0-9]{20,}$"]
   validation:
     method: GET
     url: "https://api.together.ai/v1/models"
@@ -237,7 +237,7 @@
 - name: fireworks
   category: llm
   key_prefixes: ["fw_"]
-  key_patterns: ["^fw_[a-zA-Z0-9]{32,}$"]
+  key_patterns: ["^fw_[a-zA-Z0-9]{20,}$"]
   validation:
     method: GET
     url: "https://api.fireworks.ai/v1/models"
@@ -246,7 +246,7 @@
 - name: novita
   category: llm
   key_prefixes: ["novita-"]
-  key_patterns: ["^novita-[a-zA-Z0-9]{32,}$"]
+  key_patterns: ["^novita-[a-zA-Z0-9]{20,}$"]
   validation:
     method: POST
     url: "https://api.novita.ai/v3/chat/completions"
@@ -263,7 +263,7 @@
 - name: replicate
   category: ai
   key_prefixes: ["r8_"]
-  key_patterns: ["^r8_[a-zA-Z0-9]{37}$"]
+  key_patterns: ["^r8_[a-zA-Z0-9]{20,}$", "^[A-Za-z0-9]{40}$"]
   validation:
     method: GET
     url: "https://api.replicate.com/v1/account"
@@ -275,7 +275,7 @@
 - name: elevenlabs
   category: llm
   key_prefixes: ["sk_"]
-  key_patterns: ["^sk_[a-f0-9]{32}$"]
+  key_patterns: ["^sk_[a-zA-Z0-9]{20,}$", "^[A-Za-z0-9]{30,45}$"]
   validation:
     method: GET
     url: "https://api.elevenlabs.io/v1/user"
@@ -287,7 +287,7 @@
 - name: midjourney
   category: llm
   key_prefixes: ["mj-", "goapi-", "piapi-"]
-  key_patterns: ["^(mj|goapi|piapi)-[a-zA-Z0-9]{32,}$", "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"]
+  key_patterns: ["^(mj|goapi|piapi)-[a-zA-Z0-9]{20,}$", "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"]
   validation:
     method: GET
     url: "https://api.midjourneyapi.xyz/mj/v2/account"
@@ -299,7 +299,7 @@
 - name: kilo
   category: llm
   key_prefixes: ["kilo-"]
-  key_patterns: ["^kilo-[a-zA-Z0-9]{30,}$"]
+  key_patterns: ["^kilo-[a-zA-Z0-9]{20,}$"]
   validation:
     method: POST
     url: "https://api.kilo.ai/api/gateway/v1/chat/completions"
@@ -318,7 +318,7 @@
 - name: roocode
   category: llm
   key_prefixes: ["roo-", "roocode-", "router-"]
-  key_patterns: ["^roo-[a-zA-Z0-9]{30,}$"]
+  key_patterns: ["^roo-[a-zA-Z0-9]{20,}$", "^roocode-[a-zA-Z0-9]{20,}$", "^router-[a-zA-Z0-9]{20,}$"]
   validation:
     method: POST
     url: "https://openrouter.ai/api/v1/chat/completions"
@@ -337,7 +337,7 @@
 - name: cline
   category: llm
   key_prefixes: ["cline-"]
-  key_patterns: ["^cline-[a-zA-Z0-9]{30,}$"]
+  key_patterns: ["^cline-[a-zA-Z0-9]{20,}$"]
   validation:
     method: POST
     url: "https://api.cline.bot/v1/chat/completions"
@@ -356,7 +356,7 @@
 - name: aider
   category: llm
   key_prefixes: ["aider-"]
-  key_patterns: ["^aider-[a-zA-Z0-9]{30,}$"]
+  key_patterns: ["^aider-[a-zA-Z0-9]{20,}$"]
   validation:
     method: POST
     url: "https://api.openai.com/v1/chat/completions"
@@ -370,4 +370,3 @@
       auth: "bearer"
       extract: "account_name"
       store_as: "name"
-
