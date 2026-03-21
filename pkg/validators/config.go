@@ -167,20 +167,21 @@ type PatternEntry struct {
 
 type PrefixIndex map[string][]PrefixEntry
 
-func BuildDetectionIndex(configs []ProviderConfig) ([]PrefixEntry, []PatternEntry, PrefixIndex) {
+type DetectorIndex struct {
+	prefixes  []PrefixEntry
+	patterns  []PatternEntry
+	prefixMap PrefixIndex
+	providerPatterns map[string][]*regexp.Regexp
+}
+
+func BuildDetectionIndex(configs []ProviderConfig) ([]PrefixEntry, []PatternEntry, PrefixIndex, map[string][]*regexp.Regexp) {
 	var prefixes []PrefixEntry
 	var patterns []PatternEntry
 	prefixMap := make(PrefixIndex)
+	providerPatterns := make(map[string][]*regexp.Regexp)
 
 	for _, cfg := range configs {
-		for _, p := range cfg.KeyPrefixes {
-			if p != "" {
-				entry := PrefixEntry{Prefix: p, Provider: cfg.Name, Category: cfg.Category}
-				prefixes = append(prefixes, entry)
-				firstChar := string(p[0])
-				prefixMap[firstChar] = append(prefixMap[firstChar], entry)
-			}
-		}
+		var providerRes []*regexp.Regexp
 		for _, p := range cfg.KeyPatterns {
 			re, err := regexp.Compile(p)
 			if err != nil {
@@ -188,6 +189,17 @@ func BuildDetectionIndex(configs []ProviderConfig) ([]PrefixEntry, []PatternEntr
 				continue
 			}
 			patterns = append(patterns, PatternEntry{Regex: re, Provider: cfg.Name, Category: cfg.Category})
+			providerRes = append(providerRes, re)
+		}
+		providerPatterns[cfg.Name] = providerRes
+
+		for _, p := range cfg.KeyPrefixes {
+			if p != "" {
+				entry := PrefixEntry{Prefix: p, Provider: cfg.Name, Category: cfg.Category}
+				prefixes = append(prefixes, entry)
+				firstChar := string(p[0])
+				prefixMap[firstChar] = append(prefixMap[firstChar], entry)
+			}
 		}
 	}
 
@@ -198,7 +210,7 @@ func BuildDetectionIndex(configs []ProviderConfig) ([]PrefixEntry, []PatternEntr
 		sortPrefixesByLength(entries)
 	}
 
-	return prefixes, patterns, prefixMap
+	return prefixes, patterns, prefixMap, providerPatterns
 }
 
 func sortPrefixesByLength(entries []PrefixEntry) {
@@ -213,7 +225,7 @@ func sortPatternsBySpecificity(patterns []PatternEntry) {
 	})
 }
 
-func DetectProviderFromIndex(key string, prefixes []PrefixEntry, patterns []PatternEntry, manualCategory string) string {
+func DetectProviderFromIndex(key string, prefixes []PrefixEntry, patterns []PatternEntry, manualCategory string, providerPatterns map[string][]*regexp.Regexp) string {
 	key = strings.TrimSpace(key)
 
 	if key == "" {
@@ -226,7 +238,7 @@ func DetectProviderFromIndex(key string, prefixes []PrefixEntry, patterns []Patt
 		length   int
 	}
 
-	var matches []match
+	var candidates []match
 	if len(key) > 0 {
 		for _, p := range prefixes {
 			if len(p.Prefix) > 0 && p.Prefix[0] != key[0] {
@@ -236,34 +248,59 @@ func DetectProviderFromIndex(key string, prefixes []PrefixEntry, patterns []Patt
 				continue
 			}
 			if strings.HasPrefix(key, p.Prefix) {
-				matches = append(matches, match{provider: p.Provider, prefix: p.Prefix, length: len(p.Prefix)})
+				candidates = append(candidates, match{provider: p.Provider, prefix: p.Prefix, length: len(p.Prefix)})
 			}
 		}
 	}
 
-	if len(matches) == 1 {
-		return matches[0].provider
-	}
+	if len(candidates) > 0 {
+		// Filter candidates by their patterns if they have any
+		var verifiedMatches []match
+		for _, c := range candidates {
+			res, hasPatterns := providerPatterns[c.provider]
+			if !hasPatterns || len(res) == 0 {
+				verifiedMatches = append(verifiedMatches, c)
+				continue
+			}
 
-	if len(matches) > 1 {
-		maxLen := 0
-		for _, m := range matches {
-			if m.length > maxLen {
-				maxLen = m.length
+			matchedPattern := false
+			for _, re := range res {
+				if re.MatchString(key) {
+					matchedPattern = true
+					break
+				}
+			}
+			if matchedPattern {
+				verifiedMatches = append(verifiedMatches, c)
 			}
 		}
-		var longestMatches []match
-		for _, m := range matches {
-			if m.length == maxLen {
-				longestMatches = append(longestMatches, m)
+
+		if len(verifiedMatches) == 1 {
+			return verifiedMatches[0].provider
+		}
+
+		if len(verifiedMatches) > 1 {
+			// Pick the longest prefix match among verified ones
+			maxLen := 0
+			for _, m := range verifiedMatches {
+				if m.length > maxLen {
+					maxLen = m.length
+				}
 			}
+			var longestMatches []match
+			for _, m := range verifiedMatches {
+				if m.length == maxLen {
+					longestMatches = append(longestMatches, m)
+				}
+			}
+			if len(longestMatches) == 1 {
+				return longestMatches[0].provider
+			}
+			return "unknown"
 		}
-		if len(longestMatches) == 1 {
-			return longestMatches[0].provider
-		}
-		return "unknown"
 	}
 
+	// Fallback to checking all patterns
 	patternProviders := make(map[string]bool)
 
 	for _, p := range patterns {
@@ -279,10 +316,6 @@ func DetectProviderFromIndex(key string, prefixes []PrefixEntry, patterns []Patt
 		for provider := range patternProviders {
 			return provider
 		}
-	}
-
-	if len(patternProviders) > 1 {
-		return "unknown"
 	}
 
 	return "unknown"
@@ -406,7 +439,7 @@ type DetectionResult struct {
 	Entropy     float64
 }
 
-func DetectProviderWithSuggestion(key string, prefixes []PrefixEntry, patterns []PatternEntry, manualCategory string) DetectionResult {
+func DetectProviderWithSuggestion(key string, prefixes []PrefixEntry, patterns []PatternEntry, manualCategory string, providerPatterns map[string][]*regexp.Regexp) DetectionResult {
 	key = strings.TrimSpace(key)
 	entropy := utils.CalculateShannonEntropy(key)
 
@@ -424,7 +457,7 @@ func DetectProviderWithSuggestion(key string, prefixes []PrefixEntry, patterns [
 		length   int
 	}
 
-	var matches []match
+	var candidates []match
 	if len(key) > 0 {
 		for _, p := range prefixes {
 			if len(p.Prefix) > 0 && p.Prefix[0] != key[0] {
@@ -434,52 +467,74 @@ func DetectProviderWithSuggestion(key string, prefixes []PrefixEntry, patterns [
 				continue
 			}
 			if strings.HasPrefix(key, p.Prefix) {
-				matches = append(matches, match{provider: p.Provider, prefix: p.Prefix, length: len(p.Prefix)})
+				candidates = append(candidates, match{provider: p.Provider, prefix: p.Prefix, length: len(p.Prefix)})
 			}
 		}
 	}
 
-	if len(matches) == 1 {
-		return DetectionResult{
-			Provider: matches[0].provider,
-			Entropy:  entropy,
-		}
-	}
+	if len(candidates) > 0 {
+		var verifiedMatches []match
+		for _, c := range candidates {
+			res, hasPatterns := providerPatterns[c.provider]
+			if !hasPatterns || len(res) == 0 {
+				verifiedMatches = append(verifiedMatches, c)
+				continue
+			}
 
-	if len(matches) > 1 {
-		maxLen := 0
-		for _, m := range matches {
-			if m.length > maxLen {
-				maxLen = m.length
+			matchedPattern := false
+			for _, re := range res {
+				if re.MatchString(key) {
+					matchedPattern = true
+					break
+				}
+			}
+			if matchedPattern {
+				verifiedMatches = append(verifiedMatches, c)
 			}
 		}
-		var longestMatches []match
-		for _, m := range matches {
-			if m.length == maxLen {
-				longestMatches = append(longestMatches, m)
-			}
-		}
-		if len(longestMatches) == 1 {
+
+		if len(verifiedMatches) == 1 {
 			return DetectionResult{
-				Provider: longestMatches[0].provider,
+				Provider: verifiedMatches[0].provider,
 				Entropy:  entropy,
 			}
 		}
 
-		var providerNames []string
-		seen := make(map[string]bool)
-		for _, m := range matches {
-			if !seen[m.provider] {
-				seen[m.provider] = true
-				providerNames = append(providerNames, m.provider)
+		if len(verifiedMatches) > 1 {
+			maxLen := 0
+			for _, m := range verifiedMatches {
+				if m.length > maxLen {
+					maxLen = m.length
+				}
 			}
-		}
-		suggestions := generateSuggestions(key, prefixes)
-		return DetectionResult{
-			Provider:    "unknown",
-			Suggestions: suggestions,
-			Entropy:     entropy,
-			Message:     fmt.Sprintf("Ambiguous key (Entropy: %.2f) - matches: %s. Try --deep-scan", entropy, strings.Join(providerNames, ", ")),
+			var longestMatches []match
+			for _, m := range verifiedMatches {
+				if m.length == maxLen {
+					longestMatches = append(longestMatches, m)
+				}
+			}
+			if len(longestMatches) == 1 {
+				return DetectionResult{
+					Provider: longestMatches[0].provider,
+					Entropy:  entropy,
+				}
+			}
+
+			var providerNames []string
+			seen := make(map[string]bool)
+			for _, m := range verifiedMatches {
+				if !seen[m.provider] {
+					seen[m.provider] = true
+					providerNames = append(providerNames, m.provider)
+				}
+			}
+			suggestions := generateSuggestions(key, prefixes)
+			return DetectionResult{
+				Provider:    "unknown",
+				Suggestions: suggestions,
+				Entropy:     entropy,
+				Message:     fmt.Sprintf("Ambiguous key (Entropy: %.2f) - matches: %s. Try --deep-scan", entropy, strings.Join(providerNames, ", ")),
+			}
 		}
 	}
 
