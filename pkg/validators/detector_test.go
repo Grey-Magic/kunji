@@ -23,7 +23,7 @@ func TestDetectProviderFromIndex(t *testing.T) {
 		{
 			Name:        "github",
 			Category:    "developer",
-			KeyPrefixes: []string{"ghp_", "gho_", "ghu_", "ghs_", "ghr_", "github_pat_"},
+			KeyPrefixes: []string{"ghp_", "gho_", "ghu_", "ghs_", "ghr_", "github_pat_", "ghcr_"},
 			KeyPatterns: []string{"^(gh[pousr]_[a-zA-Z0-9]{36}|github_pat_[a-zA-Z0-9]{20,}_[a-zA-Z0-9]{20,}|ghcr_[a-zA-Z0-9]{36})$"},
 		},
 		{
@@ -161,7 +161,7 @@ func TestDetectProvider_LLMSpecificPrefixes(t *testing.T) {
 		{"Fireworks key", "fw_abcdefghijklmnopqrstuvwxyz12345678", "", "fireworks"},
 		{"Replicate key", "r8_abcdefghijklmnopqrstuvwxyz1234567890", "", "replicate"},
 		{"Replicate alt key", "r8_abcdefghijklmnopqrstuvwxyz1234567890ab", "", "replicate"},
-		{"ElevenLabs key", "1234567890abcdef1234567890abcdef123456", "", "elevenlabs"},
+		{"ElevenLabs key", "xi-1234567890abcdef1234567890abcdef123456", "", "elevenlabs"},
 		{"Replicate actual", "r8_abcdefghijklmnopqrstuvwxyz1234567890", "", "replicate"},
 		{"Mistral key", "mistral-abcdef0123456789abcdef0123456789", "", "mistral"},
 		{"Cohere key", "cohere-abcdefghijklmnopqrstuvwxyz1234567890AB", "", "cohere"},
