@@ -1,6 +1,6 @@
 <div align="center">
 
-```
+```text
   ██   ██ ██    ██ ███    ██      ██ ██
   ██  ██  ██    ██ ████   ██      ██ ██
   █████   ██    ██ ██ ██  ██      ██ ██
@@ -11,12 +11,14 @@
 **Universal API Key Validation Engine**
 
 [![Go](https://img.shields.io/badge/Go-1.21%2B-00ADD8?style=flat-square&logo=go)](https://golang.org)
-[![Version](https://img.shields.io/badge/Version-1.0.6-magenta?style=flat-square)](https://github.com/Grey-Magic/kunji/releases)
+[![Version](https://img.shields.io/badge/Version-1.0.7-magenta?style=flat-square)](https://github.com/Grey-Magic/kunji/releases)
 [![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey?style=flat-square)](#installation)
 [![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)](LICENSE)
 
 <p align="center">
+  <a href="#features">Features</a> •
   <a href="#installation">Installation</a> •
+  <a href="#usage">Usage</a> •
   <a href="#security">Security</a> •
   <a href="#supported-providers">Providers</a> •
   <a href="./USAGE.md">Full Manual</a>
@@ -68,7 +70,7 @@ go install github.com/Grey-Magic/kunji@latest
 Download the latest release for your platform:
 ```bash
 # Example for Linux/macOS
-curl -sL https://github.com/Grey-Magic/kunji/releases/latest/download/kunji_1.0.5.zip -o kunji.zip
+curl -sL https://github.com/Grey-Magic/kunji/releases/latest/download/kunji_1.0.7.zip -o kunji.zip
 unzip kunji.zip && chmod +x kunji
 sudo mv kunji /usr/local/bin/
 ```
@@ -115,8 +117,6 @@ Kunji is designed with data privacy and security as a core mandate:
 
 1. **User-Only Permissions:** All result files are created with `0600` permissions (`-rw-------`), ensuring only you can read your validated keys.
 2. **Secret Scrubbing:** Kunji automatically detects and masks API keys in error messages (`[MASKED_KEY]`) before they are saved to disk.
-3. **No Data Exfiltration:** Validation happens directly between your machine and the provider API.
-
 ---
 
 ## 🏛️ Supported Providers (260+)
@@ -150,6 +150,8 @@ Adding a new provider is simple and requires **zero Go code**. Simply add a YAML
     url: "https://api.newservice.com/v1/user"
     auth: "bearer"
 ```
+
+See [**AGENTS.md**](./AGENTS.md) for full development guidelines.
 
 ## 📄 License
 
