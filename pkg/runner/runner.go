@@ -19,6 +19,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Grey-Magic/kunji/pkg/client"
 	"github.com/Grey-Magic/kunji/pkg/models"
 	"github.com/Grey-Magic/kunji/pkg/utils"
 	"github.com/Grey-Magic/kunji/pkg/validators"
@@ -27,8 +28,6 @@ import (
 
 type Runner struct {
 	Threads          int
-	adaptiveThreads  int
-	threadMux        sync.RWMutex
 	Proxy            string
 	Retries          int
 	Timeout          int
@@ -40,22 +39,29 @@ type Runner struct {
 	OnlyValid        bool
 	MinBalance       float64
 	DeepScan         bool
+	SkipMetadata     bool
+	CanaryCheck      bool
 	Password         string
 	Bench            bool
-	Validators       map[string]validators.Validator
+	Factory          *validators.ValidatorFactory
 	Detector         *validators.Detector
+	ProxyRotator     *client.ProxyRotator
 	sharedHTTPClient interface{}
+	metadataJobs     chan *models.ValidationResult
+	metadataWg       sync.WaitGroup
 }
 
-func NewRunner(threads int, proxy string, retries int, timeout int, out string, manualProv string, manualCat string, resume bool, onlyValid bool, minBalance float64) (*Runner, error) {
-	v, configs, err := validators.InitValidatorsWithConfigs(proxy, timeout)
+func NewRunner(threads int, proxy string, retries int, timeout int, out string, manualProv string, manualCat string, resume bool, onlyValid bool, minBalance float64, skipMetadata bool, canaryCheck bool) (*Runner, error) {
+	factory, configs, rotator, err := validators.NewValidatorFactory(proxy, timeout)
 	if err != nil {
 		return nil, err
 	}
 
+
+	go client.WarmDNS(validators.GetCommonDomains())
+
 	return &Runner{
 		Threads:         threads,
-		adaptiveThreads: threads,
 		Proxy:           proxy,
 		Retries:         retries,
 		Timeout:         timeout,
@@ -66,87 +72,107 @@ func NewRunner(threads int, proxy string, retries int, timeout int, out string, 
 		MinKeyLength:    4,
 		OnlyValid:       onlyValid,
 		MinBalance:      minBalance,
-		Validators:      v,
+		SkipMetadata:    skipMetadata,
+		CanaryCheck:     canaryCheck,
+		Factory:         factory,
 		Detector:        validators.NewDetectorFromConfigs(configs),
+		ProxyRotator:    rotator,
 	}, nil
 }
 
-func (r *Runner) LoadAndFilterKeys(singleKey, keyFile string) ([]string, error) {
-	spinner, _ := pterm.DefaultSpinner.Start("Loading and filtering keys...")
-	rawKeys := make([]string, 0)
-
+func (r *Runner) GetKeyStream(singleKey, keyFile string) (io.ReadCloser, int, error) {
 	if singleKey != "" {
-		rawKeys = append(rawKeys, singleKey)
+		return io.NopCloser(strings.NewReader(singleKey)), 1, nil
 	}
 
 	if keyFile != "" {
 		file, err := os.Open(keyFile)
 		if err != nil {
-			spinner.Fail("Failed to open keys file")
-			return nil, err
+			return nil, 0, err
 		}
-		defer file.Close()
+		
+		count := 0
 		scanner := bufio.NewScanner(file)
 		for scanner.Scan() {
-			rawKeys = append(rawKeys, scanner.Text())
+			if strings.TrimSpace(scanner.Text()) != "" {
+				count++
+			}
 		}
+		file.Seek(0, 0)
+		return file, count, nil
 	}
 
 	stat, _ := os.Stdin.Stat()
 	if (stat.Mode() & os.ModeCharDevice) == 0 {
+		tmpFile, err := os.CreateTemp("", "kunji_stdin_*.txt")
+		if err != nil {
+			return nil, 0, fmt.Errorf("failed to create temp file for stdin: %w", err)
+		}
+		
+		count := 0
 		scanner := bufio.NewScanner(os.Stdin)
 		for scanner.Scan() {
 			line := strings.TrimSpace(scanner.Text())
 			if line != "" {
-				rawKeys = append(rawKeys, line)
+				tmpFile.WriteString(line + "\n")
+				count++
 			}
 		}
-		if err := scanner.Err(); err != nil {
-			pterm.Warning.Printfln("Error reading from stdin: %v", err)
-		}
+		tmpFile.Seek(0, 0)
+		return tmpFile, count, nil
 	}
 
-	alreadyProcessed := make(map[string]bool)
-	if r.Resume {
-		alreadyProcessed = r.loadExistingKeys()
-		if len(alreadyProcessed) > 0 {
-			pterm.Info.Printfln("Resume Checkpoint: Found %d already processed keys in '%s'. Skipping them...", len(alreadyProcessed), r.OutFile)
-		}
-	}
-
-	uniqueKeys := make(map[string]bool)
-	var finalKeys []string
-
-	for _, k := range rawKeys {
-		k = strings.TrimSpace(k)
-
-		if len(k) >= r.MinKeyLength {
-			h := r.hashKey(k)
-			if alreadyProcessed[h] {
-				continue
-			}
-
-			if !uniqueKeys[k] {
-				uniqueKeys[k] = true
-				finalKeys = append(finalKeys, k)
-			}
-		}
-	}
-
-	spinner.Success(fmt.Sprintf("Loaded %d unique keys.", len(finalKeys)))
-	return finalKeys, nil
+	return nil, 0, fmt.Errorf("no input provided")
 }
 
-func (r *Runner) Run(keys []string) {
-	pterm.Success.Printfln("Loaded %d deduplicated and well-formatted keys.", len(keys))
+func (r *Runner) PreflightProxyCheck() {
+	if r.ProxyRotator == nil {
+		return
+	}
 
-	jobs := make(chan string, len(keys))
-	results := make(chan *models.ValidationResult, len(keys))
+	spinner, _ := pterm.DefaultSpinner.Start("Checking proxy health...")
+	deadCount := r.ProxyRotator.FilterDeadProxies(r.Timeout)
+	
+	if deadCount > 0 {
+		spinner.Warning(fmt.Sprintf("Discarded %d dead proxies. Continuing with remaining proxies.", deadCount))
+	} else {
+		spinner.Success("All proxies are healthy.")
+	}
+}
+
+func (r *Runner) Run(keyReader io.Reader, totalKeys int) {
+	pterm.Success.Printfln("Streaming %d deduplicated and well-formatted keys...", totalKeys)
+
+	bufferSize := 1000
+	if totalKeys < bufferSize {
+		bufferSize = totalKeys
+	}
+	if bufferSize == 0 {
+		bufferSize = 1
+	}
+
+	jobs := make(chan string, bufferSize)
+	results := make(chan *models.ValidationResult, bufferSize)
+	r.metadataJobs = make(chan *models.ValidationResult, bufferSize)
 	var wg sync.WaitGroup
 
-	for w := 1; w <= r.Threads; w++ {
+	numWorkers := r.Threads
+	if totalKeys > 0 && totalKeys < numWorkers {
+		numWorkers = totalKeys
+	}
+
+	for w := 1; w <= numWorkers; w++ {
 		wg.Add(1)
 		go r.worker(jobs, results, &wg)
+	}
+
+
+	metadataThreadCount := numWorkers / 2
+	if metadataThreadCount < 1 {
+		metadataThreadCount = 1
+	}
+	for w := 1; w <= metadataThreadCount; w++ {
+		go r.metadataWorker(results)
 	}
 
 	sigCh := make(chan os.Signal, 1)
@@ -163,26 +189,58 @@ func (r *Runner) Run(keys []string) {
 	}()
 
 	go func() {
-		for _, key := range keys {
-			jobs <- key
+		defer closeJobs()
+		
+		alreadyProcessed := make(map[string]bool)
+		if r.Resume {
+			alreadyProcessed = r.loadExistingKeys()
 		}
-		closeJobs()
+
+		uniqueKeys := utils.NewBloomFilter(10000000, 0.001)
+		
+		scanner := bufio.NewScanner(keyReader)
+		for scanner.Scan() {
+			key := strings.TrimSpace(scanner.Text())
+			if len(key) < r.MinKeyLength {
+				continue
+			}
+
+			if uniqueKeys.Test(key) {
+				continue
+			}
+			uniqueKeys.Add(key)
+
+			if r.Resume {
+				h := r.hashKey(key)
+				if alreadyProcessed[h] {
+					continue
+				}
+			}
+
+			select {
+			case jobs <- key:
+			case <-sigCh:
+				return
+			}
+		}
 	}()
 
 	startTime := time.Now()
 
 	go func() {
 		wg.Wait()
+		close(r.metadataJobs)
+		r.metadataWg.Wait()
 		close(results)
 	}()
 
 	validCount := 0
 
 	var p *pterm.ProgressbarPrinter
-	pp := pterm.DefaultProgressbar.WithTotal(len(keys)).WithTitle("Validating API Keys")
-	p, err := pp.Start()
-	if err != nil {
-		pterm.Warning.Println("Failed to start progress bar, continuing without it...")
+	showUI := totalKeys > 1
+	if showUI {
+		pp := pterm.DefaultProgressbar.WithTotal(totalKeys).WithTitle("Validating API Keys")
+		p, _ = pp.Start()
 	}
 
 	resultFile, err := r.openResultFile()
@@ -204,32 +262,37 @@ func (r *Runner) Run(keys []string) {
 		csvWriter.Flush()
 	}
 
-	var allResults []models.ValidationResult
 	collectAllResults := r.OutFile == "" || strings.HasSuffix(strings.ToLower(r.OutFile), ".json")
-	if collectAllResults {
-		allResults = make([]models.ValidationResult, 0, len(keys))
-	}
+	var allResults []models.ValidationResult
 
 	updateCounter := 0
 	updateCounterMutex := sync.Mutex{}
 	var progressTicker *time.Ticker
-	if p != nil {
+	if showUI {
 		progressTicker = time.NewTicker(100 * time.Millisecond)
 		defer progressTicker.Stop()
 	}
 
-	area, _ := pterm.DefaultArea.Start()
-	defer area.Stop()
+	var area *pterm.AreaPrinter
+	if showUI {
+		area, _ = pterm.DefaultArea.Start()
+		defer area.Stop()
+	}
 
 	lastResults := make([]*models.ValidationResult, 0, 5)
 
 	for {
+		var tickerChan <-chan time.Time
+		if progressTicker != nil {
+			tickerChan = progressTicker.C
+		}
+
 		select {
-		case <-progressTicker.C:
+		case <-tickerChan:
 			updateCounterMutex.Lock()
 			if p != nil && updateCounter > 0 {
 				current := p.Current
-				if current < len(keys) {
+				if current < totalKeys {
 					p.Increment()
 				}
 				updateCounter = 0
@@ -277,8 +340,6 @@ func (r *Runner) Run(keys []string) {
 
 			if shouldKeep {
 				if r.OutFile != "" {
-					// If password is set, we must collect all results and encrypt at the end
-					// instead of streaming to file.
 					if collectAllResults || r.Password != "" {
 						allResults = append(allResults, *res)
 					}
@@ -296,7 +357,9 @@ done:
 	if p != nil {
 		p.Stop()
 	}
-	area.Stop()
+	if area != nil {
+		area.Stop()
+	}
 
 	pterm.Println()
 
@@ -311,11 +374,11 @@ done:
 	}
 
 	duration := time.Since(startTime)
-	keysPerSec := float64(len(keys)) / duration.Seconds()
+	keysPerSec := float64(totalKeys) / duration.Seconds()
 
 	validPercent := 0
-	if len(keys) > 0 {
-		validPercent = (validCount * 100) / len(keys)
+	if totalKeys > 0 {
+		validPercent = (validCount * 100) / totalKeys
 	}
 
 	validColor := pterm.FgGreen
@@ -325,9 +388,9 @@ done:
 
 	stats := pterm.TableData{
 		{pterm.LightCyan("Metric"), pterm.LightCyan("Value")},
-		{"Total Keys", fmt.Sprintf("%d", len(keys))},
+		{"Total Keys", fmt.Sprintf("%d", totalKeys)},
 		{"Valid Keys", pterm.NewStyle(validColor).Sprint(validCount)},
-		{"Invalid Keys", pterm.Red(len(keys) - validCount)},
+		{"Invalid Keys", pterm.Red(totalKeys - validCount)},
 		{"Throughput", fmt.Sprintf("%.2f keys/s", keysPerSec)},
 		{"Total Time", duration.Round(time.Millisecond).String()},
 	}
@@ -379,32 +442,126 @@ func (r *Runner) worker(jobs <-chan string, results chan<- *models.ValidationRes
 			continue
 		}
 
-		var lastResult *models.ValidationResult
-		for _, providerName := range providersToTry {
-			val, exists := r.Validators[providerName]
-			if !exists {
-				continue
+		if len(providersToTry) == 1 {
+			val, exists := r.Factory.GetValidator(providersToTry[0])
+			if exists {
+				val.SetSkipMetadata(true)
+				val.SetCanaryCheck(r.CanaryCheck)
+				res := r.validateWithRetries(val, key, providersToTry[0])
+				
+				if res.IsValid && !r.SkipMetadata {
+					r.metadataWg.Add(1)
+					select {
+					case r.metadataJobs <- res:
+					default:
+						r.metadataWg.Done()
+						results <- res
+					}
+				} else {
+					results <- res
+				}
 			}
+			continue
+		}
 
-			finalRes := r.validateWithRetries(val, key, providerName)
-			lastResult = finalRes
-			if finalRes.IsValid {
+		var probeWg sync.WaitGroup
+		probeResults := make(chan *models.ValidationResult, len(providersToTry))
+		ctx, cancel := context.WithCancel(context.Background())
+
+		for _, pName := range providersToTry {
+			probeWg.Add(1)
+			go func(name string) {
+				defer probeWg.Done()
+				val, exists := r.Factory.GetValidator(name)
+				if !exists {
+					return
+				}
+				val.SetSkipMetadata(true)
+				val.SetCanaryCheck(r.CanaryCheck)
+				
+				res := r.validateWithRetriesWithContext(ctx, val, key, name)
+				if res.IsValid {
+					cancel()
+				}
+				probeResults <- res
+			}(pName)
+		}
+
+		go func() {
+			probeWg.Wait()
+			close(probeResults)
+			cancel()
+		}()
+
+		var bestResult *models.ValidationResult
+		for res := range probeResults {
+			if bestResult == nil || res.IsValid {
+				bestResult = res
+			}
+			if res.IsValid {
+				go func() {
+					for range probeResults {}
+				}()
 				break
 			}
 		}
-		results <- lastResult
+
+		if bestResult.IsValid && !r.SkipMetadata {
+			r.metadataWg.Add(1)
+			select {
+			case r.metadataJobs <- bestResult:
+			default:
+				r.metadataWg.Done()
+				results <- bestResult
+			}
+		} else {
+			results <- bestResult
+		}
+	}
+}
+
+func (r *Runner) metadataWorker(results chan<- *models.ValidationResult) {
+	for res := range r.metadataJobs {
+		val, exists := r.Factory.GetValidator(res.Provider)
+		if exists {
+
+
+
+			val.SetSkipMetadata(false)
+			enriched, err := val.Validate(context.Background(), res.Key)
+			if err == nil {
+				results <- enriched
+			} else {
+				results <- res
+			}
+		} else {
+			results <- res
+		}
+		r.metadataWg.Done()
 	}
 }
 
 func (r *Runner) validateWithRetries(val validators.Validator, key, providerName string) *models.ValidationResult {
+	return r.validateWithRetriesWithContext(context.Background(), val, key, providerName)
+}
+
+func (r *Runner) validateWithRetriesWithContext(parentCtx context.Context, val validators.Validator, key, providerName string) *models.ValidationResult {
 	var finalRes *models.ValidationResult
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(r.Timeout)*time.Second*time.Duration(r.Retries+1))
+	ctx, cancel := context.WithTimeout(parentCtx, time.Duration(r.Timeout)*time.Second*time.Duration(r.Retries+1))
 	defer cancel()
 
 	for attempt := 0; attempt <= r.Retries; attempt++ {
+		select {
+		case <-parentCtx.Done():
+			return &models.ValidationResult{Key: key, Provider: providerName, IsValid: false, ErrorMessage: "Probe cancelled"}
+		default:
+		}
+
 		res, err := val.Validate(ctx, key)
 
 		if err != nil {
+			if r.ProxyRotator != nil {
+			}
 			errStr := err.Error()
 			if strings.Contains(errStr, "timeout") {
 				errStr = "Request Timeout"
@@ -421,7 +578,6 @@ func (r *Runner) validateWithRetries(val validators.Validator, key, providerName
 		}
 
 		if res.StatusCode == 429 && attempt < r.Retries {
-			r.adjustThreads(false)
 			backoff := 2
 			if res.RetryAfter > 0 {
 				backoff = res.RetryAfter
@@ -431,12 +587,11 @@ func (r *Runner) validateWithRetries(val validators.Validator, key, providerName
 		}
 
 		if res.IsValid {
-			r.adjustThreads(true)
 			if r.Bench {
 				var totalTime float64 = res.ResponseTime
 				count := 1
 				for i := 0; i < 2; i++ {
-					time.Sleep(200 * time.Millisecond) // Small delay
+					time.Sleep(200 * time.Millisecond)
 					benchRes, err := val.Validate(ctx, key)
 					if err == nil {
 						totalTime += benchRes.ResponseTime
@@ -452,21 +607,6 @@ func (r *Runner) validateWithRetries(val validators.Validator, key, providerName
 		break
 	}
 	return finalRes
-}
-
-func (r *Runner) adjustThreads(increase bool) {
-	r.threadMux.Lock()
-	defer r.threadMux.Unlock()
-	if increase {
-		if r.adaptiveThreads < r.Threads {
-			r.adaptiveThreads++
-		}
-	} else {
-		r.adaptiveThreads = r.adaptiveThreads / 2
-		if r.adaptiveThreads < 1 {
-			r.adaptiveThreads = 1
-		}
-	}
 }
 
 func (r *Runner) openResultFile() (*os.File, error) {
@@ -753,7 +893,7 @@ func (r *Runner) displayValidKeysTable(results []models.ValidationResult) {
 
 func (r *Runner) displayInvalidKeysTable(results []models.ValidationResult) {
 	tableData := pterm.TableData{
-		{"Provider", "Key", "Status", "Error"},
+		{"Provider", "Key", "Status", "Reason", "Error"},
 	}
 
 	for _, res := range results {
@@ -768,7 +908,9 @@ func (r *Runner) displayInvalidKeysTable(results []models.ValidationResult) {
 		}
 
 		statusStr := "✗ Invalid"
-		if res.StatusCode > 0 {
+		if res.InvalidReason != "" {
+			statusStr = "✗ " + res.InvalidReason
+		} else if res.StatusCode > 0 {
 			switch res.StatusCode {
 			case 401:
 				statusStr = "✗ Unauthorized"
@@ -787,26 +929,29 @@ func (r *Runner) displayInvalidKeysTable(results []models.ValidationResult) {
 			}
 		}
 
-		if strings.Contains(strings.ToLower(res.ErrorMessage), "disabled") {
-			statusStr = "✗ Disabled"
-		} else if strings.Contains(strings.ToLower(res.ErrorMessage), "blocked") {
-			statusStr = "✗ Blocked"
-		} else if strings.Contains(strings.ToLower(res.ErrorMessage), "expired") {
-			statusStr = "✗ Expired"
-		} else if strings.Contains(strings.ToLower(res.ErrorMessage), "revok") {
-			statusStr = "✗ Revoked"
-		} else if strings.Contains(strings.ToLower(res.ErrorMessage), "invalid") {
-			statusStr = "✗ Invalid Key"
-		} else if strings.Contains(strings.ToLower(res.ErrorMessage), "quota") {
-			statusStr = "✗ Quota Exceeded"
-		} else if strings.Contains(strings.ToLower(res.ErrorMessage), "insufficient") {
-			statusStr = "✗ Insufficient"
+		if res.InvalidReason == "" {
+			if strings.Contains(strings.ToLower(res.ErrorMessage), "disabled") {
+				statusStr = "✗ Disabled"
+			} else if strings.Contains(strings.ToLower(res.ErrorMessage), "blocked") {
+				statusStr = "✗ Blocked"
+			} else if strings.Contains(strings.ToLower(res.ErrorMessage), "expired") {
+				statusStr = "✗ Expired"
+			} else if strings.Contains(strings.ToLower(res.ErrorMessage), "revok") {
+				statusStr = "✗ Revoked"
+			} else if strings.Contains(strings.ToLower(res.ErrorMessage), "invalid") {
+				statusStr = "✗ Invalid Key"
+			} else if strings.Contains(strings.ToLower(res.ErrorMessage), "quota") {
+				statusStr = "✗ Quota Exceeded"
+			} else if strings.Contains(strings.ToLower(res.ErrorMessage), "insufficient") {
+				statusStr = "✗ Insufficient"
+			}
 		}
 
 		tableData = append(tableData, []string{
 			pterm.Cyan(res.Provider),
 			keyMasked,
 			statusStr,
+			res.InvalidReason,
 			pterm.Gray(errMsg),
 		})
 	}
@@ -973,7 +1118,7 @@ func (r *Runner) loadExistingKeys() map[string]bool {
 
 	if strings.HasSuffix(ext, ".csv") {
 		reader := csv.NewReader(strings.NewReader(content))
-		_, _ = reader.Read() // Skip header
+		_, _ = reader.Read()
 		for {
 			record, err := reader.Read()
 			if err == io.EOF {
