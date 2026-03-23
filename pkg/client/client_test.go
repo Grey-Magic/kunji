@@ -22,7 +22,6 @@ func TestGetRandomUserAgent(t *testing.T) {
 	result := GetRandomUserAgent()
 	assert.Contains(t, userAgents, result, "should return a valid user agent")
 
-	// Test that function returns valid values
 	for i := 0; i < 10; i++ {
 		ua := GetRandomUserAgent()
 		assert.NotEmpty(t, ua, "should return non-empty user agent")
@@ -73,8 +72,8 @@ func TestNewProxyRotator_NoPrefix(t *testing.T) {
 }
 
 func TestNewProxyRotator_MultipleProxies(t *testing.T) {
-	// Create temp file with proxies
-	content := "http://proxy1.com:8080\nhttp://proxy2.com:8080\nsocks5://proxy3.com:1080\n"
+
+	content := "http://proxy1.com:8080\nhttp:
 	tmpFile, err := os.CreateTemp("", "proxies*.txt")
 	require.NoError(t, err)
 	defer os.Remove(tmpFile.Name())
@@ -99,7 +98,6 @@ func TestProxyRotator_GetProxy(t *testing.T) {
 		proxies: []*url.URL{proxy1, proxy2, proxy3},
 	}
 
-	// Test round-robin rotation
 	p1, _ := rotator.GetProxy(nil)
 	assert.Equal(t, "proxy1.com:8080", p1.Host)
 
@@ -109,7 +107,6 @@ func TestProxyRotator_GetProxy(t *testing.T) {
 	p3, _ := rotator.GetProxy(nil)
 	assert.Equal(t, "proxy3.com:8080", p3.Host)
 
-	// Should wrap around
 	p4, _ := rotator.GetProxy(nil)
 	assert.Equal(t, "proxy1.com:8080", p4.Host, "should cycle back to first proxy")
 }
@@ -123,17 +120,19 @@ func TestProxyRotator_GetProxy_Empty(t *testing.T) {
 }
 
 func TestNewHTTPClient(t *testing.T) {
-	client, err := NewHTTPClient("", 30)
+	client, rotator, err := NewHTTPClient("", 30)
 
 	require.NoError(t, err)
 	assert.NotNil(t, client)
+	assert.NotNil(t, rotator)
 	assert.NotNil(t, client.Transport)
 	assert.Equal(t, 30*time.Second, client.Timeout)
 }
 
 func TestNewHTTPClient_WithProxy(t *testing.T) {
-	client, err := NewHTTPClient("http://proxy.com:8080", 15)
+	client, rotator, err := NewHTTPClient("http://proxy.com:8080", 15)
 
 	require.NoError(t, err)
 	assert.NotNil(t, client)
+	assert.NotNil(t, rotator)
 }
