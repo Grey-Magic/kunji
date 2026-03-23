@@ -1,4 +1,3 @@
-//go:build integration
 
 package runner
 
@@ -19,7 +18,7 @@ func TestIntegration_OpenAI_ValidKey(t *testing.T) {
 		t.Skip("Set KUNJI_TEST_OPENAI_KEY to run integration test")
 	}
 
-	v, _, err := validators.InitValidatorsWithConfigs("", 15)
+	v, _, _, err := validators.InitValidatorsWithConfigs("", 15)
 	require.NoError(t, err)
 
 	val, exists := v["openai"]
@@ -39,7 +38,7 @@ func TestIntegration_OpenAI_ValidKey(t *testing.T) {
 func TestIntegration_OpenAI_InvalidKey(t *testing.T) {
 	key := "sk-test-invalid-key-12345"
 
-	v, _, err := validators.InitValidatorsWithConfigs("", 15)
+	v, _, _, err := validators.InitValidatorsWithConfigs("", 15)
 	require.NoError(t, err)
 
 	val, exists := v["openai"]
@@ -60,7 +59,7 @@ func TestIntegration_GitHub_ValidKey(t *testing.T) {
 		t.Skip("Set KUNJI_TEST_GITHUB_KEY to run integration test")
 	}
 
-	v, _, err := validators.InitValidatorsWithConfigs("", 15)
+	v, _, _, err := validators.InitValidatorsWithConfigs("", 15)
 	require.NoError(t, err)
 
 	val, exists := v["github"]
@@ -81,7 +80,7 @@ func TestIntegration_Stripe_ValidKey(t *testing.T) {
 		t.Skip("Set KUNJI_TEST_STRIPE_KEY to run integration test")
 	}
 
-	v, _, err := validators.InitValidatorsWithConfigs("", 15)
+	v, _, _, err := validators.InitValidatorsWithConfigs("", 15)
 	require.NoError(t, err)
 
 	val, exists := v["stripe"]
@@ -102,7 +101,7 @@ func TestIntegration_Anthropic_ValidKey(t *testing.T) {
 		t.Skip("Set KUNJI_TEST_ANTHROPIC_KEY to run integration test")
 	}
 
-	v, _, err := validators.InitValidatorsWithConfigs("", 15)
+	v, _, _, err := validators.InitValidatorsWithConfigs("", 15)
 	require.NoError(t, err)
 
 	val, exists := v["anthropic"]
@@ -134,7 +133,7 @@ func TestIntegration_ProviderDetection(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			detector := validators.NewDetector("", nil)
+			detector := validators.NewDetector()
 			result := detector.DetectProvider(tt.key, "")
 			assert.Equal(t, tt.expected, result, "Provider should be detected correctly")
 		})
@@ -151,7 +150,7 @@ func TestIntegration_CompositeKey_Twilio(t *testing.T) {
 
 	key := accountSid + ":" + authToken
 
-	v, _, err := validators.InitValidatorsWithConfigs("", 15)
+	v, _, _, err := validators.InitValidatorsWithConfigs("", 15)
 	require.NoError(t, err)
 
 	val, exists := v["twilio"]

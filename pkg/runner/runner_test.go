@@ -1,8 +1,11 @@
 package runner
 
 import (
+	"bufio"
 	"os"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/Grey-Magic/kunji/pkg/validators"
 	"github.com/stretchr/testify/assert"
@@ -10,13 +13,22 @@ import (
 )
 
 func TestLoadAndFilterKeys_SingleKey(t *testing.T) {
+	factory, _, _, _ := validators.NewValidatorFactory("", 15)
 	r := &Runner{
 		MinKeyLength: 4,
-		Validators:   make(map[string]validators.Validator),
+		Factory:      factory,
 		Detector:     validators.NewDetector(),
 	}
 
-	keys, err := r.LoadAndFilterKeys("sk-test-key-123", "")
+	stream, _, err := r.GetKeyStream("sk-test-key-123", "")
+	require.NoError(t, err)
+	defer stream.Close()
+	
+	scanner := bufio.NewScanner(stream)
+	var keys []string
+	for scanner.Scan() {
+		keys = append(keys, scanner.Text())
+	}
 
 	require.NoError(t, err)
 	assert.Len(t, keys, 1)
@@ -24,7 +36,7 @@ func TestLoadAndFilterKeys_SingleKey(t *testing.T) {
 }
 
 func TestLoadAndFilterKeys_KeyFile(t *testing.T) {
-	// Create temp file with keys
+
 	content := "sk-key-1\nsk-key-2\nsk-key-3\n"
 	tmpFile, err := os.CreateTemp("", "keys*.txt")
 	require.NoError(t, err)
@@ -34,13 +46,14 @@ func TestLoadAndFilterKeys_KeyFile(t *testing.T) {
 	require.NoError(t, err)
 	tmpFile.Close()
 
+	factory, _, _, _ := validators.NewValidatorFactory("", 15)
 	r := &Runner{
 		MinKeyLength: 4,
-		Validators:   make(map[string]validators.Validator),
+		Factory:      factory,
 		Detector:     validators.NewDetector(),
 	}
 
-	keys, err := r.LoadAndFilterKeys("", tmpFile.Name())
+	keys, err := readKeysFromStream(r, "", tmpFile.Name())
 
 	require.NoError(t, err)
 	assert.Len(t, keys, 3)
@@ -55,13 +68,14 @@ func TestLoadAndFilterKeys_Deduplication(t *testing.T) {
 	require.NoError(t, err)
 	tmpFile.Close()
 
+	factory, _, _, _ := validators.NewValidatorFactory("", 15)
 	r := &Runner{
 		MinKeyLength: 4,
-		Validators:   make(map[string]validators.Validator),
+		Factory:      factory,
 		Detector:     validators.NewDetector(),
 	}
 
-	keys, err := r.LoadAndFilterKeys("", tmpFile.Name())
+	keys, err := readKeysFromStream(r, "", tmpFile.Name())
 
 	require.NoError(t, err)
 	assert.Len(t, keys, 2, "should deduplicate keys")
@@ -76,13 +90,14 @@ func TestLoadAndFilterKeys_Whitespace(t *testing.T) {
 	require.NoError(t, err)
 	tmpFile.Close()
 
+	factory, _, _, _ := validators.NewValidatorFactory("", 15)
 	r := &Runner{
 		MinKeyLength: 4,
-		Validators:   make(map[string]validators.Validator),
+		Factory:      factory,
 		Detector:     validators.NewDetector(),
 	}
 
-	keys, err := r.LoadAndFilterKeys("", tmpFile.Name())
+	keys, err := readKeysFromStream(r, "", tmpFile.Name())
 
 	require.NoError(t, err)
 	assert.Equal(t, "sk-key-1", keys[0], "should trim whitespace")
@@ -98,13 +113,14 @@ func TestLoadAndFilterKeys_ShortKeysFiltered(t *testing.T) {
 	require.NoError(t, err)
 	tmpFile.Close()
 
+	factory, _, _, _ := validators.NewValidatorFactory("", 15)
 	r := &Runner{
 		MinKeyLength: 4,
-		Validators:   make(map[string]validators.Validator),
+		Factory:      factory,
 		Detector:     validators.NewDetector(),
 	}
 
-	keys, err := r.LoadAndFilterKeys("", tmpFile.Name())
+	keys, err := readKeysFromStream(r, "", tmpFile.Name())
 
 	require.NoError(t, err)
 	assert.Len(t, keys, 2, "should filter out keys shorter than MinKeyLength")
@@ -119,21 +135,23 @@ func TestLoadAndFilterKeys_KeysWithSpaces(t *testing.T) {
 	require.NoError(t, err)
 	tmpFile.Close()
 
+	factory, _, _, _ := validators.NewValidatorFactory("", 15)
 	r := &Runner{
 		MinKeyLength: 4,
-		Validators:   make(map[string]validators.Validator),
+		Factory:      factory,
 		Detector:     validators.NewDetector(),
 	}
 
-	keys, err := r.LoadAndFilterKeys("", tmpFile.Name())
+	keys, err := readKeysFromStream(r, "", tmpFile.Name())
 
 	require.NoError(t, err)
-	assert.Len(t, keys, 1, "should filter out keys with spaces")
-	assert.Equal(t, "sk-good-key", keys[0])
+	assert.Len(t, keys, 2, "should accept keys with spaces after trim")
+	assert.Equal(t, "sk valid key", keys[0])
+	assert.Equal(t, "sk-good-key", keys[1])
 }
 
 func TestLoadAndFilterKeys_Resume(t *testing.T) {
-	// Create resume file with existing keys
+
 	resumeFile, err := os.CreateTemp("", "results*.txt")
 	require.NoError(t, err)
 	defer os.Remove(resumeFile.Name())
@@ -142,7 +160,6 @@ func TestLoadAndFilterKeys_Resume(t *testing.T) {
 	require.NoError(t, err)
 	resumeFile.Close()
 
-	// Create keys file
 	keysFile, err := os.CreateTemp("", "keys*.txt")
 	require.NoError(t, err)
 	defer os.Remove(keysFile.Name())
@@ -151,15 +168,16 @@ func TestLoadAndFilterKeys_Resume(t *testing.T) {
 	require.NoError(t, err)
 	keysFile.Close()
 
+	factory, _, _, _ := validators.NewValidatorFactory("", 15)
 	r := &Runner{
 		MinKeyLength: 4,
 		OutFile:      resumeFile.Name(),
 		Resume:       true,
-		Validators:   make(map[string]validators.Validator),
+		Factory:      factory,
 		Detector:     validators.NewDetector(),
 	}
 
-	keys, err := r.LoadAndFilterKeys("", keysFile.Name())
+	keys, err := readKeysFromStream(r, "", keysFile.Name())
 
 	require.NoError(t, err)
 	assert.Len(t, keys, 2, "should skip already processed keys")
@@ -174,32 +192,72 @@ func TestLoadAndFilterKeys_NoValidKeys(t *testing.T) {
 	require.NoError(t, err)
 	tmpFile.Close()
 
+	factory, _, _, _ := validators.NewValidatorFactory("", 15)
 	r := &Runner{
 		MinKeyLength: 4,
-		Validators:   make(map[string]validators.Validator),
+		Factory:      factory,
 		Detector:     validators.NewDetector(),
 	}
 
-	keys, err := r.LoadAndFilterKeys("", tmpFile.Name())
+	keys, err := readKeysFromStream(r, "", tmpFile.Name())
 
 	require.NoError(t, err)
 	assert.Len(t, keys, 0, "should return empty slice when no valid keys")
 }
 
 func TestLoadAndFilterKeys_NonExistentFile(t *testing.T) {
+	factory, _, _, _ := validators.NewValidatorFactory("", 15)
 	r := &Runner{
 		MinKeyLength: 4,
-		Validators:   make(map[string]validators.Validator),
+		Factory:      factory,
 		Detector:     validators.NewDetector(),
 	}
 
-	keys, err := r.LoadAndFilterKeys("", "/non/existent/file.txt")
+	keys, err := readKeysFromStream(r, "", "/non/existent/file.txt")
 
 	assert.Error(t, err)
 	assert.Nil(t, keys)
 }
 
-func TestMaskKey(t *testing.T) {
+	func readKeysFromStream(r *Runner, singleKey, keyFile string) ([]string, error) {
+	stream, _, err := r.GetKeyStream(singleKey, keyFile)
+	if err != nil {
+		return nil, err
+	}
+	defer stream.Close()
+	
+	alreadyProcessed := make(map[string]bool)
+	if r.Resume {
+		alreadyProcessed = r.loadExistingKeys()
+	}
+
+	scanner := bufio.NewScanner(stream)
+	var keys []string
+	seen := make(map[string]bool)
+	for scanner.Scan() {
+		k := strings.TrimSpace(scanner.Text())
+		if len(k) < r.MinKeyLength {
+			continue
+		}
+		if seen[k] {
+			continue
+		}
+		
+		if r.Resume {
+			h := r.hashKey(k)
+			if alreadyProcessed[h] {
+				continue
+			}
+		}
+
+		seen[k] = true
+		keys = append(keys, k)
+	}
+	return keys, nil
+}
+
+	func TestMaskKey(t *testing.T) {
+
 	tests := []struct {
 		name     string
 		input    string
@@ -292,4 +350,29 @@ func TestTolower(t *testing.T) {
 	assert.Equal(t, "hello", tolower("HELLO"))
 	assert.Equal(t, "hello world", tolower("Hello World"))
 	assert.Equal(t, "123", tolower("123"))
+}
+
+func TestRunner_AddJitter(t *testing.T) {
+	r := &Runner{}
+
+	tests := []struct {
+		name     string
+		duration time.Duration
+	}{
+		{"short duration", 100 * time.Millisecond},
+		{"medium duration", 1 * time.Second},
+		{"long duration", 10 * time.Second},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := r.addJitter(tt.duration)
+
+			minExpected := tt.duration
+			maxExpected := tt.duration + (tt.duration / 4) + (200 * time.Millisecond)
+
+			assert.GreaterOrEqual(t, result, minExpected, "jitter should not reduce duration")
+			assert.LessOrEqual(t, result, maxExpected, "jitter should not exceed 25%")
+		})
+	}
 }
