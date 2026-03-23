@@ -7,10 +7,49 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
 var SkipSSRFCheck bool
+var (
+	dnsCache    = make(map[string]error)
+	dnsCacheMux sync.RWMutex
+	publicDomains = map[string]bool{
+		"api.openai.com":         true,
+		"api.anthropic.com":      true,
+		"api.deepseek.com":       true,
+		"generativelanguage.googleapis.com": true,
+		"huggingface.co":         true,
+		"api.x.ai":               true,
+		"api.mistral.ai":         true,
+		"api.cohere.com":         true,
+		"api.perplexity.ai":      true,
+		"api.groq.com":           true,
+		"api.together.ai":        true,
+		"api.fireworks.ai":       true,
+		"api.elevenlabs.io":      true,
+		"api.stripe.com":         true,
+		"api.github.com":         true,
+		"api.twilio.com":         true,
+		"api.sendgrid.com":       true,
+		"api.cloudflare.com":     true,
+		"api.digitalocean.com":   true,
+		"api.heroku.com":         true,
+		"api.pagerduty.com":      true,
+		"api.hubapi.com":         true,
+		"app.asana.com":          true,
+		"api.datocms.com":        true,
+		"api.braintrustdata.com": true,
+		"api.planetscale.com":    true,
+		"api.censys.io":          true,
+		"api.bitwarden.com":      true,
+		"api.bigcommerce.com":    true,
+		"api.mailgun.net":        true,
+		"api.getpostman.com":     true,
+		"api.brevo.com":          true,
+	}
+)
 
 func ValidateURL(rawURL string) error {
 	if SkipSSRFCheck {
@@ -26,18 +65,39 @@ func ValidateURL(rawURL string) error {
 		return fmt.Errorf("SSRF prevention: local hostnames are not allowed")
 	}
 
+	if publicDomains[host] {
+		return nil
+	}
+
+	dnsCacheMux.RLock()
+	cachedErr, exists := dnsCache[host]
+	dnsCacheMux.RUnlock()
+	if exists {
+		return cachedErr
+	}
+
+	dnsCacheMux.Lock()
+	defer dnsCacheMux.Unlock()
+
+	if cachedErr, exists := dnsCache[host]; exists {
+		return cachedErr
+	}
+
 	ips, err := net.LookupIP(host)
 	if err != nil {
-
+		dnsCache[host] = nil
 		return nil
 	}
 
 	for _, ip := range ips {
 		if ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsPrivate() {
-			return fmt.Errorf("SSRF prevention: private/local IP addresses are not allowed (%s)", ip.String())
+			err := fmt.Errorf("SSRF prevention: private/local IP addresses are not allowed (%s)", ip.String())
+			dnsCache[host] = err
+			return err
 		}
 	}
 
+	dnsCache[host] = nil
 	return nil
 }
 

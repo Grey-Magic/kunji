@@ -5,6 +5,7 @@ import (
 	"crypto/cipher"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/base64"
 	"fmt"
 	"io"
 
@@ -42,7 +43,6 @@ func Encrypt(data []byte, password string) ([]byte, error) {
 
 	ciphertext := gcm.Seal(nil, nonce, data, nil)
 
-	// Result: Salt + Nonce + Ciphertext
 	result := append(salt, nonce...)
 	result = append(result, ciphertext...)
 
@@ -50,12 +50,12 @@ func Encrypt(data []byte, password string) ([]byte, error) {
 }
 
 func Decrypt(data []byte, password string) ([]byte, error) {
-	if len(data) < saltSize+12 { // Min size for salt + nonce (12 for GCM)
+	if len(data) < saltSize+12 {
 		return nil, fmt.Errorf("invalid encrypted data")
 	}
 
 	salt := data[:saltSize]
-	nonceSize := 12 // Default GCM nonce size
+	nonceSize := 12
 	nonce := data[saltSize : saltSize+nonceSize]
 	ciphertext := data[saltSize+nonceSize:]
 
@@ -77,4 +77,11 @@ func Decrypt(data []byte, password string) ([]byte, error) {
 	}
 
 	return plaintext, nil
+}
+
+func Base64Decode(s string) ([]byte, error) {
+	if data, err := base64.StdEncoding.DecodeString(s); err == nil {
+		return data, nil
+	}
+	return base64.URLEncoding.DecodeString(s)
 }
