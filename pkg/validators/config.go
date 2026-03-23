@@ -4,6 +4,7 @@ import (
 	"embed"
 	"fmt"
 	"io/fs"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -16,7 +17,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-//go:embed providers/*.yaml
+//go:embed providers
 var providersFS embed.FS
 
 type MetadataConfig struct {
@@ -55,14 +56,17 @@ type ValidationConfig struct {
 }
 
 type ProviderConfig struct {
-	Name                   string                  `yaml:"name"`
-	Category               string                  `yaml:"category"`
-	KeyPrefixes            []string                `yaml:"key_prefixes"`
-	KeyPatterns            []string                `yaml:"key_patterns"`
-	Validation             ValidationConfig        `yaml:"validation"`
-	Metadata               []MetadataConfig        `yaml:"metadata"`
-	MetadataFromValidation *MetadataFromValidation `yaml:"metadata_from_validation"`
+	Name                    string                  `yaml:"name"`
+	Category                string                  `yaml:"category"`
+	KeyPrefixes             []string                `yaml:"key_prefixes"`
+	KeyPatterns             []string                `yaml:"key_patterns"`
+	SyntaxCheck             string                  `yaml:"syntax_check,omitempty"`
+	CanaryPatterns          []string                `yaml:"canary_patterns,omitempty"`
+	Validation              ValidationConfig        `yaml:"validation"`
+	Metadata                []MetadataConfig        `yaml:"metadata,omitempty"`
+	MetadataFromValidation  *MetadataFromValidation `yaml:"metadata_from_validation,omitempty"`
 }
+
 
 var (
 	configsCache       []ProviderConfig
@@ -254,7 +258,6 @@ func DetectProviderFromIndex(key string, prefixes []PrefixEntry, patterns []Patt
 	}
 
 	if len(candidates) > 0 {
-		// Filter candidates by their patterns if they have any
 		var verifiedMatches []match
 		for _, c := range candidates {
 			res, hasPatterns := providerPatterns[c.provider]
@@ -280,7 +283,6 @@ func DetectProviderFromIndex(key string, prefixes []PrefixEntry, patterns []Patt
 		}
 
 		if len(verifiedMatches) > 1 {
-			// Pick the longest prefix match among verified ones
 			maxLen := 0
 			for _, m := range verifiedMatches {
 				if m.length > maxLen {
@@ -300,7 +302,6 @@ func DetectProviderFromIndex(key string, prefixes []PrefixEntry, patterns []Patt
 		}
 	}
 
-	// Fallback to checking all patterns
 	patternProviders := make(map[string]bool)
 
 	for _, p := range patterns {
@@ -583,6 +584,37 @@ func DetectProviderWithSuggestion(key string, prefixes []PrefixEntry, patterns [
 		Entropy:     entropy,
 		Message:     msg,
 	}
+}
+
+func GetCommonDomains() []string {
+	configs, err := LoadProviderConfigs()
+	if err != nil {
+		return nil
+	}
+
+	domainMap := make(map[string]bool)
+	for _, cfg := range configs {
+		if u, err := url.Parse(cfg.Validation.URL); err == nil {
+			host := u.Hostname()
+			if host != "" {
+				domainMap[host] = true
+			}
+		}
+		for _, m := range cfg.Metadata {
+			if u, err := url.Parse(m.URL); err == nil {
+				host := u.Hostname()
+				if host != "" {
+					domainMap[host] = true
+				}
+			}
+		}
+	}
+
+	domains := make([]string, 0, len(domainMap))
+	for d := range domainMap {
+		domains = append(domains, d)
+	}
+	return domains
 }
 
 func generateSuggestions(key string, prefixes []PrefixEntry) []string {
