@@ -274,8 +274,8 @@
 
 - name: elevenlabs
   category: llm
-  key_prefixes: ["sk_"]
-  key_patterns: ["^sk_[a-zA-Z0-9]{20,}$", "^[A-Za-z0-9]{30,45}$"]
+  key_prefixes: ["sk_", "xi-"]
+  key_patterns: ["^sk_[a-zA-Z0-9]{20,}$", "^xi-[a-zA-Z0-9]{20,}$", "^[A-Za-z0-9]{30,45}$"]
   validation:
     method: GET
     url: "https://api.elevenlabs.io/v1/user"

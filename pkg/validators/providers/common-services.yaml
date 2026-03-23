@@ -2,6 +2,7 @@
   category: infrastructure
   key_prefixes: ["AKIA", "ASIA", "AGPA", "AROA", "AIPA", "ANPA", "ANVA"]
   key_patterns: ["^(AKIA|ASIA|AGPA|AROA|AIPA|ANPA|ANVA)[0-9A-Z]{16}$"]
+  canary_patterns: ["^AKIA.*EXAMPLE$", "^AKIA.*CANARY"]
   validation:
     method: GET
     url: "https://sts.amazonaws.com/?Action=GetCallerIdentity&Version=2011-06-15"
@@ -23,6 +24,7 @@
   category: email
   key_prefixes: ["SG."]
   key_patterns: ["(?i)^SG\\.[a-zA-Z0-9_-]{22}\\.[a-zA-Z0-9_-]{43}$"]
+  syntax_check: base64
   validation:
     method: GET
     url: "https://api.sendgrid.com/v3/scopes"
@@ -38,6 +40,7 @@
   category: payments
   key_prefixes: ["sk_live_", "sk_test_"]
   key_patterns: ["(?i)^sk_(live|test)_[a-zA-Z0-9]{24,99}$"]
+  syntax_check: base64
   validation:
     method: GET
     url: "https://api.stripe.com/v1/charges?limit=1"
@@ -173,7 +176,9 @@
 - name: github
   category: developer
   key_prefixes: ["ghp_", "gho_", "ghu_", "ghs_", "ghr_", "github_pat_", "ghcr_"]
-  key_patterns: ["^(gh[pousr]_[a-zA-Z0-9]{36}|github_pat_[a-zA-Z0-9]{22}_[a-zA-Z0-9]{59}|ghcr_[a-zA-Z0-9]{36})$"]
+  key_patterns: ["^(gh[pousr]_[a-zA-Z0-9]{36}|github_pat_[a-zA-Z0-9]{20,}_[a-zA-Z0-9]{20,}|ghcr_[a-zA-Z0-9]{36})$"]
+  canary_patterns: ["^ghp_canary", "^github_pat_.*_canary"]
+
   validation:
     method: GET
     url: "https://api.github.com/user"
@@ -239,8 +244,9 @@
 
 - name: datadog
   category: monitoring
-  key_prefixes: ["DD_API_", "DD_APP_"]
+  key_prefixes: ["DD_API_"]
   key_patterns: ["(?i)^DD_API_[a-f0-9]{32}$", "(?i)^DD_APP_[a-f0-9]{40}$"]
+
   validation:
     method: GET
     url: "https://api.datadoghq.com/api/v1/user/me"
@@ -1324,6 +1330,7 @@
   category: communication
   key_prefixes: ["xoxb-", "xoxp-", "xoxa-", "xoxr-"]
   key_patterns: ["^xox[baprs]-[0-9a-zA-Z]{10,48}$", "^xoxb-[0-9]{11}-[0-9]{11}-[0-9a-zA-Z]{24}$", "^xoxp-[0-9]{11}-[0-9]{11}-[0-9a-zA-Z]{24}$"]
+  canary_patterns: ["^xoxb-.*-canary"]
   validation:
     method: GET
     url: "https://slack.com/api/auth.test"
