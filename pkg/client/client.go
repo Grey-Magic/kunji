@@ -2,6 +2,7 @@ package client
 
 import (
 	"bufio"
+	"context"
 	"crypto/rand"
 	"math/big"
 	"net"
@@ -11,6 +12,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/pterm/pterm"
+	"golang.org/x/time/rate"
 )
 
 var userAgents = []string{
@@ -41,11 +45,8 @@ func NewProxyRotator(proxyInput string) (*ProxyRotator, error) {
 
 	urls := []*url.URL{}
 
-	if _, err := os.Stat(proxyInput); err == nil {
-		file, err := os.Open(proxyInput)
-		if err != nil {
-			return nil, err
-		}
+	file, err := os.Open(proxyInput)
+	if err == nil {
 		defer file.Close()
 		scanner := bufio.NewScanner(file)
 		for scanner.Scan() {
@@ -60,35 +61,221 @@ func NewProxyRotator(proxyInput string) (*ProxyRotator, error) {
 				}
 			}
 		}
-	} else {
-		line := proxyInput
-		if !strings.HasPrefix(line, "http") && !strings.HasPrefix(line, "socks5") {
-			line = "http://" + line
+		if len(urls) > 0 {
+			return &ProxyRotator{proxies: urls}, nil
 		}
-		u, err := url.Parse(line)
-		if err == nil {
-			urls = append(urls, u)
-		}
+	}
+
+	line := proxyInput
+	if !strings.HasPrefix(line, "http") && !strings.HasPrefix(line, "socks5") {
+		line = "http://" + line
+	}
+	u, err := url.Parse(line)
+	if err == nil {
+		urls = append(urls, u)
 	}
 
 	return &ProxyRotator{proxies: urls}, nil
 }
 
 func (pr *ProxyRotator) GetProxy(req *http.Request) (*url.URL, error) {
+	pr.mux.Lock()
+	defer pr.mux.Unlock()
 	if len(pr.proxies) == 0 {
 		return nil, nil
 	}
-	pr.mux.Lock()
-	defer pr.mux.Unlock()
 	p := pr.proxies[pr.index]
 	pr.index = (pr.index + 1) % len(pr.proxies)
 	return p, nil
 }
 
-func NewHTTPClient(proxyStr string, timeoutSecs int) (*http.Client, error) {
+func (pr *ProxyRotator) ReportFailure(pxy *url.URL) {
+	pr.mux.Lock()
+	defer pr.mux.Unlock()
+	
+	newProxies := []*url.URL{}
+	found := false
+	for _, p := range pr.proxies {
+		if p.String() == pxy.String() {
+			found = true
+			continue
+		}
+		newProxies = append(newProxies, p)
+	}
+	
+	if found {
+		pr.proxies = newProxies
+		if len(pr.proxies) > 0 {
+			pr.index = pr.index % len(pr.proxies)
+		}
+	}
+}
+
+func (pr *ProxyRotator) FilterDeadProxies(timeoutSecs int) int {
+	if len(pr.proxies) == 0 {
+		return 0
+	}
+
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	validProxies := []*url.URL{}
+	
+	testURL := "https://api.ipify.org?format=json"
+	
+	for _, p := range pr.proxies {
+		wg.Add(1)
+		go func(pxy *url.URL) {
+			defer wg.Done()
+			
+			transport := &http.Transport{
+				Proxy: http.ProxyURL(pxy),
+				DialContext: (&net.Dialer{
+					Timeout: time.Duration(timeoutSecs) * time.Second,
+				}).DialContext,
+			}
+			client := &http.Client{
+				Transport: transport,
+				Timeout:   time.Duration(timeoutSecs) * time.Second,
+			}
+			
+			req, _ := http.NewRequest("GET", testURL, nil)
+			req.Header.Set("User-Agent", GetRandomUserAgent())
+			
+			resp, err := client.Do(req)
+			if err == nil {
+				defer resp.Body.Close()
+				if resp.StatusCode == 200 {
+					mu.Lock()
+					validProxies = append(validProxies, pxy)
+					mu.Unlock()
+				}
+			}
+		}(p)
+	}
+	
+	wg.Wait()
+	
+	deadCount := len(pr.proxies) - len(validProxies)
+	pr.mux.Lock()
+	pr.proxies = validProxies
+	pr.index = 0
+	pr.mux.Unlock()
+	
+	return deadCount
+}
+
+type providerState struct {
+	limiter        *rate.Limiter
+	consecutive429 int
+	currentR       rate.Limit
+	lastSuccess    time.Time
+}
+
+type RateLimiterManager struct {
+	states   map[string]*providerState
+	mux      sync.RWMutex
+	defaultR rate.Limit
+	defaultB int
+}
+
+func NewRateLimiterManager(r rate.Limit, b int) *RateLimiterManager {
+	return &RateLimiterManager{
+		states:   make(map[string]*providerState),
+		defaultR: r,
+		defaultB: b,
+	}
+}
+
+func (rm *RateLimiterManager) Wait(ctx context.Context, provider string) error {
+	rm.mux.RLock()
+	state, exists := rm.states[provider]
+	rm.mux.RUnlock()
+
+	if !exists {
+		rm.mux.Lock()
+		state, exists = rm.states[provider]
+		if !exists {
+			state = &providerState{
+				limiter:  rate.NewLimiter(rm.defaultR, rm.defaultB),
+				currentR: rm.defaultR,
+			}
+			rm.states[provider] = state
+		}
+		rm.mux.Unlock()
+	}
+
+	return state.limiter.Wait(ctx)
+}
+
+func (rm *RateLimiterManager) ReportResult(provider string, statusCode int) {
+	rm.mux.Lock()
+	defer rm.mux.Unlock()
+
+	state, exists := rm.states[provider]
+	if !exists {
+		return
+	}
+
+	if statusCode == 429 {
+		state.consecutive429++
+		newR := state.currentR / 2
+		if newR < 0.1 {
+			newR = 0.1
+		}
+		state.currentR = newR
+		state.limiter.SetLimit(state.currentR)
+		pterm.Debug.Printfln("Throttling %s due to 429. New limit: %.2f req/s", provider, float64(state.currentR))
+	} else if statusCode >= 200 && statusCode < 300 {
+		state.consecutive429 = 0
+		state.lastSuccess = time.Now()
+		
+		if state.currentR < rm.defaultR {
+			newR := state.currentR * 1.2
+			if newR > rm.defaultR {
+				newR = rm.defaultR
+			}
+			state.currentR = newR
+			state.limiter.SetLimit(state.currentR)
+			pterm.Debug.Printfln("Scaling up %s after success. New limit: %.2f req/s", provider, float64(state.currentR))
+		}
+	}
+}
+
+func (rm *RateLimiterManager) SetLimit(provider string, r rate.Limit, b int) {
+	rm.mux.Lock()
+	defer rm.mux.Unlock()
+	rm.states[provider] = &providerState{
+		limiter:  rate.NewLimiter(r, b),
+		currentR: r,
+	}
+}
+
+var (
+	dnsCache    = make(map[string][]net.IP)
+	dnsCacheMux sync.RWMutex
+)
+
+func WarmDNS(domains []string) {
+	var wg sync.WaitGroup
+	for _, domain := range domains {
+		wg.Add(1)
+		go func(d string) {
+			defer wg.Done()
+			ips, err := net.LookupIP(d)
+			if err == nil && len(ips) > 0 {
+				dnsCacheMux.Lock()
+				dnsCache[d] = ips
+				dnsCacheMux.Unlock()
+			}
+		}(domain)
+	}
+	wg.Wait()
+}
+
+func NewHTTPClient(proxyStr string, timeoutSecs int) (*http.Client, *ProxyRotator, error) {
 	rotator, err := NewProxyRotator(proxyStr)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	dialTimeout := time.Duration(timeoutSecs) * time.Second
@@ -96,18 +283,35 @@ func NewHTTPClient(proxyStr string, timeoutSecs int) (*http.Client, error) {
 		dialTimeout = 10 * time.Second
 	}
 
+	dialer := &net.Dialer{
+		Timeout:   dialTimeout,
+		KeepAlive: 60 * time.Second,
+	}
+
 	transport := &http.Transport{
 		Proxy: rotator.GetProxy,
-		DialContext: (&net.Dialer{
-			Timeout:       dialTimeout,
-			KeepAlive:     30 * time.Second,
-			FallbackDelay: -1,
-		}).DialContext,
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			host, port, _ := net.SplitHostPort(addr)
+			dnsCacheMux.RLock()
+			ips, found := dnsCache[host]
+			dnsCacheMux.RUnlock()
+
+			if found && len(ips) > 0 {
+
+				for _, ip := range ips {
+					conn, err := dialer.DialContext(ctx, network, net.JoinHostPort(ip.String(), port))
+					if err == nil {
+						return conn, nil
+					}
+				}
+			}
+			return dialer.DialContext(ctx, network, addr)
+		},
 		ForceAttemptHTTP2:     true,
-		MaxIdleConns:          2000,
-		MaxIdleConnsPerHost:   200,
-		MaxConnsPerHost:       200,
-		IdleConnTimeout:       120 * time.Second,
+		MaxIdleConns:          10000,
+		MaxIdleConnsPerHost:   500,
+		MaxConnsPerHost:       500,
+		IdleConnTimeout:       180 * time.Second,
 		TLSHandshakeTimeout:   10 * time.Second,
 		ExpectContinueTimeout: 1 * time.Second,
 		ResponseHeaderTimeout: dialTimeout,
@@ -122,5 +326,5 @@ func NewHTTPClient(proxyStr string, timeoutSecs int) (*http.Client, error) {
 		},
 	}
 
-	return client, nil
+	return client, rotator, nil
 }
