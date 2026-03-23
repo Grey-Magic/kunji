@@ -1,7 +1,9 @@
 package cmd
 
 import (
+	"bufio"
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 
@@ -26,16 +28,20 @@ var (
 	onlyValid       bool
 	minBalance      float64
 	customProviders string
+	skipMetadata    bool
+	canaryCheck     bool
 	dryRun          bool
-	deepScan        bool
-	password        string
 	bench           bool
-)
+	password        string
+	deepScan        bool
+	)
+
 
 var validateCmd = &cobra.Command{
 	Use:   "validate",
 	Short: "Validate API keys",
 	Long:  `A lightning-fast engine for validating API keys individually or in bulk, with built-in proxy rotation and metadata extraction.`,
+	Args:  cobra.NoArgs,
 	Run: func(cmd *cobra.Command, args []string) {
 		PrintBanner()
 
@@ -48,34 +54,41 @@ var validateCmd = &cobra.Command{
 			return
 		}
 
-		if threads < 1 {
-			threads = 1
-			pterm.Warning.Println("Threads set to minimum of 1")
-		}
-		if threads > 100 {
-			threads = 100
-			pterm.Warning.Println("Threads capped at 100")
+		hasInput := singleKey != "" || keysFile != ""
+		stat, _ := os.Stdin.Stat()
+		hasStdin := (stat.Mode() & os.ModeCharDevice) == 0
+
+		if !hasInput && !hasStdin {
+			pterm.Error.Println("Error: No input provided. Use -k/--key for a single key, -f/--keys for a file, or pipe keys via stdin.")
+			pterm.Info.Println("Run 'kunji validate --help' for usage information.")
+			os.Exit(1)
 		}
 
-		if timeout < 5 {
-			timeout = 5
-			pterm.Warning.Println("Timeout set to minimum of 5 seconds")
-		}
-		if timeout > 120 {
-			timeout = 120
-			pterm.Warning.Println("Timeout capped at 120 seconds")
+		if singleKey != "" && keysFile != "" {
+			pterm.Error.Println("Error: Cannot use both -k/--key and -f/--keys. Please provide only one input source.")
+			os.Exit(1)
 		}
 
-		if retries < 0 {
-			retries = 0
-			pterm.Warning.Println("Retries set to 0 (no retries)")
-		}
-		if retries > 10 {
-			retries = 10
-			pterm.Warning.Println("Retries capped at 10")
+		if singleKey == "" && keysFile == "" && hasStdin {
+			pterm.Info.Println("Reading keys from stdin...")
 		}
 
-		runr, err := runner.NewRunner(threads, proxy, retries, timeout, outputFile, provider, category, resume, onlyValid, minBalance)
+		if threads < 1 || threads > 100 {
+			pterm.Error.Printfln("Error: threads must be between 1 and 100 (got %d)", threads)
+			os.Exit(1)
+		}
+
+		if timeout < 5 || timeout > 120 {
+			pterm.Error.Printfln("Error: timeout must be between 5 and 120 seconds (got %d)", timeout)
+			os.Exit(1)
+		}
+
+		if retries < 0 || retries > 10 {
+			pterm.Error.Printfln("Error: retries must be between 0 and 10 (got %d)", retries)
+			os.Exit(1)
+		}
+
+		runr, err := runner.NewRunner(threads, proxy, retries, timeout, outputFile, provider, category, resume, onlyValid, minBalance, skipMetadata, canaryCheck)
 		if err != nil {
 			pterm.Error.Printfln("Error initializing runner: %v", err)
 			return
@@ -84,20 +97,26 @@ var validateCmd = &cobra.Command{
 		runr.Password = password
 		runr.Bench = bench
 
-		keys, err := runr.LoadAndFilterKeys(singleKey, keysFile)
+		runr.PreflightProxyCheck()
+
+		stream, count, err := runr.GetKeyStream(singleKey, keysFile)
 		if err != nil {
-			pterm.Error.Printfln("Error loading keys: %v", err)
+			pterm.Error.Printfln("Error opening key stream: %v", err)
 			return
 		}
+		defer stream.Close()
 
-		if len(keys) == 0 {
-			pterm.Warning.Println("No valid keys found to process.")
+		if count == 0 {
+			pterm.Warning.Println("No keys found to process.")
 			return
 		}
 
 		if dryRun {
-			pterm.Info.Printfln("Dry Run Mode: Analyzing %d keys...", len(keys))
-			for _, k := range keys {
+			pterm.Info.Printfln("Dry Run Mode: Analyzing %d keys...", count)
+			scanner := bufio.NewScanner(stream)
+			for scanner.Scan() {
+				k := strings.TrimSpace(scanner.Text())
+				if k == "" { continue }
 				detection := runr.Detector.DetectProviderWithSuggestion(k, category)
 				if detection.Provider != "unknown" {
 					pterm.Success.Printfln("Key: %s... -> Provider: %s", k[:min(len(k), 8)], detection.Provider)
@@ -108,9 +127,18 @@ var validateCmd = &cobra.Command{
 			return
 		}
 
-		pterm.Info.Printfln("Starting validation with %d threads...", threads)
-		runr.Run(keys)
+		if count == 1 {
+		}
+
+		runr.Run(stream, count)
 	},
+}
+
+func maskKey(k string) string {
+	if len(k) < 12 {
+		return "******"
+	}
+	return k[:6] + "....." + k[len(k)-4:]
 }
 
 func listProviders() {
@@ -183,6 +211,8 @@ func init() {
 	validateCmd.Flags().BoolVarP(&list, "list", "l", false, "List all supported providers")
 
 	validateCmd.Flags().BoolVar(&onlyValid, "only-valid", false, "Only output valid keys to file/console")
+	validateCmd.Flags().BoolVar(&skipMetadata, "skip-metadata", false, "Skip fetching account metadata (balance, name, etc.) for speed")
+	validateCmd.Flags().BoolVar(&canaryCheck, "no-canary-check", true, "Disable automated canary/honeypot token detection")
 	validateCmd.Flags().Float64Var(&minBalance, "min-balance", 0.0, "Minimum balance required to consider key valid and output it")
 	validateCmd.Flags().StringVar(&customProviders, "custom-providers", "", "Path to directory containing custom provider YAML files")
 	validateCmd.Flags().BoolVar(&dryRun, "dry-run", false, "Detect providers without making network requests")

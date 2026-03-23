@@ -10,7 +10,7 @@ import (
 
 var rootCmd = &cobra.Command{
 	Use:     "kunji",
-	Version: "1.0.6",
+	Version: "1.0.7",
 	Short:   "A fast, concurrent CLI tool for validating API keys.",
 	Long: `Kunji is a high-performance command-line utility written in Go.
 It rapidly tests API keys from various services and providers

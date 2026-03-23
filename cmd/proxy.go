@@ -22,8 +22,14 @@ var proxyTimeout int
 var checkProxiesCmd = &cobra.Command{
 	Use:   "check-proxies",
 	Short: "Check the health of a list of proxies",
+	Args:  cobra.NoArgs,
 	Run: func(cmd *cobra.Command, args []string) {
 		PrintBanner()
+
+		if proxyTimeout < 1 || proxyTimeout > 60 {
+			pterm.Error.Printfln("Error: timeout must be between 1 and 60 seconds (got %d)", proxyTimeout)
+			os.Exit(1)
+		}
 
 		if proxyFile == "" {
 			pterm.Error.Println("Please provide a proxy file using --proxy")
@@ -77,7 +83,7 @@ var checkProxiesCmd = &cobra.Command{
 					return
 				}
 
-				httpClient, _ := client.NewHTTPClient(pxyStr, proxyTimeout)
+				httpClient, _, _ := client.NewHTTPClient(pxyStr, proxyTimeout)
 
 				ctx, cancel := context.WithTimeout(context.Background(), time.Duration(proxyTimeout)*time.Second)
 				defer cancel()

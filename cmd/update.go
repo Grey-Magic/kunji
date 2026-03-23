@@ -33,6 +33,7 @@ var updateCmd = &cobra.Command{
 	Use:   "update",
 	Short: "Update kunji to the latest version",
 	Long:  `Checks GitHub for the latest release and updates the kunji binary if a newer version is available.`,
+	Args:  cobra.NoArgs,
 	Run: func(cmd *cobra.Command, args []string) {
 		pterm.Info.Printfln("Current version: %s", currentVersion)
 		pterm.Info.Println("Checking for updates...")
@@ -116,6 +117,7 @@ var updateCmd = &cobra.Command{
 var updateProvidersCmd = &cobra.Command{
 	Use:   "providers",
 	Short: "Update provider definitions from remote source",
+	Args:  cobra.NoArgs,
 	Run: func(cmd *cobra.Command, args []string) {
 		pterm.Info.Println("Updating provider definitions...")
 

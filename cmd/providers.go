@@ -14,6 +14,7 @@ var providersCmd = &cobra.Command{
 	Use:   "providers",
 	Short: "List and explore providers",
 	Long:  `List all supported providers, categories, or services for a specific provider.`,
+	Args:  cobra.MaximumNArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		if len(args) > 0 {
 			showProviderServices(args[0])
@@ -26,6 +27,7 @@ var providersCmd = &cobra.Command{
 var listCategoriesCmd = &cobra.Command{
 	Use:   "categories",
 	Short: "List all provider categories",
+	Args:  cobra.NoArgs,
 	Run: func(cmd *cobra.Command, args []string) {
 		listCategories()
 	},
@@ -34,6 +36,7 @@ var listCategoriesCmd = &cobra.Command{
 var listLLMCmd = &cobra.Command{
 	Use:   "llm",
 	Short: "List all LLM providers",
+	Args:  cobra.NoArgs,
 	Run: func(cmd *cobra.Command, args []string) {
 		listProvidersByCategory("llm")
 	},
@@ -42,6 +45,7 @@ var listLLMCmd = &cobra.Command{
 var listCommonCmd = &cobra.Command{
 	Use:   "common",
 	Short: "List all common service providers",
+	Args:  cobra.NoArgs,
 	Run: func(cmd *cobra.Command, args []string) {
 		listProvidersByCategory("common")
 	},
@@ -50,6 +54,7 @@ var listCommonCmd = &cobra.Command{
 var listSecurityCmd = &cobra.Command{
 	Use:   "security",
 	Short: "List all security providers",
+	Args:  cobra.NoArgs,
 	Run: func(cmd *cobra.Command, args []string) {
 		listProvidersByCategory("security")
 	},
