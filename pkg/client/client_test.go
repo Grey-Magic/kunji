@@ -72,8 +72,7 @@ func TestNewProxyRotator_NoPrefix(t *testing.T) {
 }
 
 func TestNewProxyRotator_MultipleProxies(t *testing.T) {
-
-	content := "http://proxy1.com:8080\nhttp:
+	content := "http://proxy1.com:8080\nhttp://proxy2.com:8080\nhttp://proxy3.com:8080"
 	tmpFile, err := os.CreateTemp("", "proxies*.txt")
 	require.NoError(t, err)
 	defer os.Remove(tmpFile.Name())

@@ -1,4 +1,3 @@
-
 package runner
 
 import (
@@ -27,7 +26,8 @@ func TestIntegration_OpenAI_ValidKey(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	result := val.Validate(ctx, key)
+	result, err := val.Validate(ctx, key)
+	require.NoError(t, err)
 	require.NotNil(t, result)
 
 	assert.True(t, result.IsValid, "OpenAI key should be valid")
@@ -47,7 +47,8 @@ func TestIntegration_OpenAI_InvalidKey(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	result := val.Validate(ctx, key)
+	result, err := val.Validate(ctx, key)
+	require.NoError(t, err)
 	require.NotNil(t, result)
 
 	assert.False(t, result.IsValid, "Invalid OpenAI key should not be valid")
@@ -68,7 +69,8 @@ func TestIntegration_GitHub_ValidKey(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	result := val.Validate(ctx, key)
+	result, err := val.Validate(ctx, key)
+	require.NoError(t, err)
 	require.NotNil(t, result)
 
 	assert.True(t, result.IsValid, "GitHub key should be valid")
@@ -89,7 +91,8 @@ func TestIntegration_Stripe_ValidKey(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	result := val.Validate(ctx, key)
+	result, err := val.Validate(ctx, key)
+	require.NoError(t, err)
 	require.NotNil(t, result)
 
 	assert.True(t, result.IsValid, "Stripe key should be valid")
@@ -110,7 +113,8 @@ func TestIntegration_Anthropic_ValidKey(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	result := val.Validate(ctx, key)
+	result, err := val.Validate(ctx, key)
+	require.NoError(t, err)
 	require.NotNil(t, result)
 
 	assert.True(t, result.IsValid, "Anthropic key should be valid")
@@ -122,13 +126,13 @@ func TestIntegration_ProviderDetection(t *testing.T) {
 		key      string
 		expected string
 	}{
-		{"OpenAI sk-", "sk-test-key-12345", "openai"},
-		{"OpenAI sk1-", "sk1-test-key-12345", "openai"},
-		{"Anthropic sk-ant-", "sk-ant-test123", "anthropic"},
-		{"Groq gsk_", "gsk_test123456789", "groq"},
-		{"GitHub ghp_", "ghp_test123456789", "github"},
-		{"Stripe sk_live_", "sk_live_test123456789", "stripe"},
-		{"Slack xoxb-", "xoxb-test123456789", "slack"},
+		{"OpenAI sk-", "sk-abcdefghijklmnopqrstuvwxyz1234567890abcdefghijkl", "openai"},
+		{"OpenAI sk1-", "sk1-abcdefghijklmnopqrstuvwxyz1234567890abcdefghijkl", "openai"},
+		{"Anthropic sk-ant-", "sk-ant-api03-abcdefghijklmnopqrstuvwxyz1234567890", "anthropic"},
+		{"Groq gsk_", "gsk_abcdefghijklmnopqrstuvwxyz1234567890abcdefghij", "groq"},
+		{"GitHub ghp_", "ghp_123456789012345678901234567890123456", "github"},
+		{"Stripe sk_live_", "sk_live_abcdefghijklmnopqrstuvwxyz1234567890", "stripe"},
+		{"Slack xoxb-", "xoxb-12345678901-12345678901-abcdefghijklmnopqrstuvwx", "slack"},
 	}
 
 	for _, tt := range tests {
@@ -159,7 +163,8 @@ func TestIntegration_CompositeKey_Twilio(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	result := val.Validate(ctx, key)
+	result, err := val.Validate(ctx, key)
+	require.NoError(t, err)
 	require.NotNil(t, result)
 
 	assert.True(t, result.IsValid, "Twilio composite key should be valid")

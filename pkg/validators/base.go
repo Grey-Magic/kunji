@@ -10,4 +10,7 @@ type Validator interface {
 	Name() string
 	KeyPatterns() []string
 	Validate(ctx context.Context, apiKey string) (*models.ValidationResult, error)
+	SetSkipMetadata(bool)
+	SetCanaryCheck(bool)
+	FetchMetadata(ctx context.Context, apiKey string, result *models.ValidationResult)
 }

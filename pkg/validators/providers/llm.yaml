@@ -24,7 +24,7 @@
   key_patterns: ["^sk-deepseek-[a-zA-Z0-9]{32,}$", "^sk-[a-f0-9]{32}$"]
   validation:
     method: POST
-    url: "https://api.deepseek.com/chat/completions"
+    url: "https://api.deepseek.com/v1/chat/completions"
     auth: "bearer"
     body: '{"model":"deepseek-chat","messages":[{"role":"user","content":"Hi"}],"max_tokens":1}'
   metadata:
@@ -107,9 +107,18 @@
   key_patterns: ["^sk-qwen-[a-z0-9]{20,}$", "^sk-dashscope-[a-z0-9]{20,}$"]
   validation:
     method: POST
-    url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions"
+    url: "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
     auth: "bearer"
-    body: '{"model":"qwen3.5-plus","messages":[{"role":"user","content":"Hi"}],"max_tokens":1}'
+    endpoints:
+      - url: "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
+        region: "china"
+      - url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions"
+        region: "singapore"
+      - url: "https://dashscope-us.aliyuncs.com/compatible-mode/v1/chat/completions"
+        region: "us-virginia"
+      - url: "https://cn-hongkong.dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
+        region: "hong-kong"
+    body: '{"model":"qwen-turbo","messages":[{"role":"user","content":"Hi"}],"max_tokens":1}'
   metadata:
     - url: "https://dashscope.aliyuncs.com/api/v1/balance"
       method: GET
@@ -124,6 +133,11 @@
     method: POST
     url: "https://api.moonshot.cn/v1/chat/completions"
     auth: "bearer"
+    endpoints:
+      - url: "https://api.moonshot.cn/v1/chat/completions"
+        region: "china"
+      - url: "https://api.moonshot.ai/v1/chat/completions"
+        region: "global"
     body: '{"model":"kimi-k2.5","messages":[{"role":"user","content":"Hi"}],"max_tokens":1}'
   metadata:
     - url: "https://api.moonshot.cn/v1/users/me/balance"
@@ -139,6 +153,11 @@
     method: POST
     url: "https://api.minimax.io/v1/text/chatcompletion_v2"
     auth: "bearer"
+    error_check:
+      json_path: "base_resp.status_code"
+    endpoints:
+      - url: "https://api.minimax.chat/v1/text/chatcompletion_v2"
+        region: "apac"
     body: '{"model":"MiniMax-M2.5","messages":[{"role":"user","content":"Hi"}],"max_tokens":1}'
   metadata:
     - url: "https://api.minimax.chat/v1/account/balance"
@@ -154,6 +173,11 @@
     method: POST
     url: "https://open.bigmodel.cn/api/paas/v4/chat/completions"
     auth: "bearer"
+    endpoints:
+      - url: "https://open.bigmodel.cn/api/paas/v4/chat/completions"
+        region: "china"
+      - url: "https://api.z.ai/api/paas/v4/chat/completions"
+        region: "international"
     body: '{"model":"glm-5","messages":[{"role":"user","content":"Hi"}],"max_tokens":1}'
   metadata:
     - url: "https://open.bigmodel.cn/api/paas/v4/user/balance"
@@ -163,8 +187,8 @@
 
 - name: openai
   category: llm
-  key_prefixes: ["sk-proj-", "sk-svcacct-"]
-  key_patterns: ["^sk-proj-[a-zA-Z0-9_-]{20,}$", "^sk-svcacct-[a-zA-Z0-9_-]{20,}$", "^sk-[a-zA-Z0-9]{48}$", "^sk-[A-Za-z0-9]{20}T3BlbkFJ[A-Za-z0-9]{20}$"]
+  key_prefixes: ["sk-proj-", "sk-svcacct-", "sk-", "sk1-"]
+  key_patterns: ["^sk-proj-[a-zA-Z0-9_-]{20,}$", "^sk-svcacct-[a-zA-Z0-9_-]{20,}$", "^sk[a-zA-Z0-9]?-[a-zA-Z0-9]{48}$", "^sk-[A-Za-z0-9]{20}T3BlbkFJ[A-Za-z0-9]{20}$"]
   validation:
     method: POST
     url: "https://api.openai.com/v1/chat/completions"
@@ -231,7 +255,7 @@
   key_patterns: ["^together-[a-f0-9]{20,}$"]
   validation:
     method: GET
-    url: "https://api.together.ai/v1/models"
+    url: "https://api.together.xyz/v1/models"
     auth: "bearer"
 
 - name: fireworks
@@ -240,7 +264,7 @@
   key_patterns: ["^fw_[a-zA-Z0-9]{20,}$"]
   validation:
     method: GET
-    url: "https://api.fireworks.ai/v1/models"
+    url: "https://api.fireworks.ai/inference/v1/models"
     auth: "bearer"
 
 - name: novita
@@ -249,7 +273,7 @@
   key_patterns: ["^novita-[a-zA-Z0-9]{20,}$"]
   validation:
     method: POST
-    url: "https://api.novita.ai/v3/chat/completions"
+    url: "https://api.novita.ai/v3/openai/chat/completions"
     auth: "bearer"
     headers:
       content-type: "application/json"
@@ -280,6 +304,13 @@
     method: GET
     url: "https://api.elevenlabs.io/v1/user"
     auth: "header:xi-api-key"
+    endpoints:
+      - url: "https://api.elevenlabs.io/v1/user"
+        region: "us"
+      - url: "https://api.eu.residency.elevenlabs.io/v1/user"
+        region: "eu"
+      - url: "https://api.in.residency.elevenlabs.io/v1/user"
+        region: "india"
   metadata_from_validation:
     name_path: "subscription.tier"
     balance_path: "subscription.character_count"

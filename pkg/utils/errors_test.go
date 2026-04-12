@@ -88,7 +88,7 @@ func TestParseRetryAfter(t *testing.T) {
 			headers: map[string][]string{
 				"X-Ratelimit-Reset": {"1700000000"},
 			},
-			expectedSeconds: 0, // Will be > 0 at runtime but we test for parsing
+			expectedSeconds: 0,
 		},
 		{
 			name: "X-RateLimit-Reset header",
@@ -117,7 +117,7 @@ func TestParseRetryAfter(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := ParseRetryAfter(tt.headers)
-			// For timestamp tests, just verify it parses without error
+
 			if tt.name == "X-Ratelimit-Reset as timestamp" {
 				assert.GreaterOrEqual(t, result, 0)
 			} else {

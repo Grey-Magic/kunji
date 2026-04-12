@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Grey-Magic/kunji/pkg/validators"
+	"github.com/Grey-Magic/kunji/pkg/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -23,7 +24,7 @@ func TestLoadAndFilterKeys_SingleKey(t *testing.T) {
 	stream, _, err := r.GetKeyStream("sk-test-key-123", "")
 	require.NoError(t, err)
 	defer stream.Close()
-	
+
 	scanner := bufio.NewScanner(stream)
 	var keys []string
 	for scanner.Scan() {
@@ -219,14 +220,14 @@ func TestLoadAndFilterKeys_NonExistentFile(t *testing.T) {
 	assert.Nil(t, keys)
 }
 
-	func readKeysFromStream(r *Runner, singleKey, keyFile string) ([]string, error) {
+func readKeysFromStream(r *Runner, singleKey, keyFile string) ([]string, error) {
 	stream, _, err := r.GetKeyStream(singleKey, keyFile)
 	if err != nil {
 		return nil, err
 	}
 	defer stream.Close()
-	
-	alreadyProcessed := make(map[string]bool)
+
+	alreadyProcessed := utils.NewBloomFilter(10000000, 0.001)
 	if r.Resume {
 		alreadyProcessed = r.loadExistingKeys()
 	}
@@ -242,12 +243,9 @@ func TestLoadAndFilterKeys_NonExistentFile(t *testing.T) {
 		if seen[k] {
 			continue
 		}
-		
-		if r.Resume {
-			h := r.hashKey(k)
-			if alreadyProcessed[h] {
-				continue
-			}
+
+		if r.Resume && alreadyProcessed.Test(k) {
+			continue
 		}
 
 		seen[k] = true
@@ -256,7 +254,7 @@ func TestLoadAndFilterKeys_NonExistentFile(t *testing.T) {
 	return keys, nil
 }
 
-	func TestMaskKey(t *testing.T) {
+func TestMaskKey(t *testing.T) {
 
 	tests := []struct {
 		name     string

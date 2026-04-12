@@ -3,11 +3,12 @@ package models
 import "fmt"
 
 type ValidationResult struct {
-	Key          string                 `json:"key"`
-	Provider     string                 `json:"provider"`
-	IsValid      bool                   `json:"is_valid"`
-	InvalidReason string                 `json:"invalid_reason,omitempty"`
-	StatusCode   int                    `json:"status_code"`
+	Key           string `json:"key"`
+	Provider      string `json:"provider"`
+	Endpoint      string `json:"endpoint,omitempty"`
+	IsValid       bool   `json:"is_valid"`
+	InvalidReason string `json:"invalid_reason,omitempty"`
+	StatusCode    int    `json:"status_code"`
 
 	StatusNote   string                 `json:"status_note,omitempty"`
 	ResponseTime float64                `json:"response_time_sec"`

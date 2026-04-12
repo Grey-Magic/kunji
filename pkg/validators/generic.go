@@ -19,12 +19,15 @@ import (
 )
 
 type GenericValidator struct {
-	config       ProviderConfig
-	client       *http.Client
-	limiter      *client.RateLimiterManager
-	bodyBytes    []byte
-	skipMetadata bool
-	checkCanary  bool
+	config            ProviderConfig
+	client            *http.Client
+	limiter           *client.RateLimiterManager
+	cache             *client.ValidationCache
+	bodyBytes         []byte
+	skipMetadata      bool
+	checkCanary       bool
+	compiledCanaryRe  []*regexp.Regexp
+	canaryCompiled    bool
 }
 
 func NewGenericValidatorWithClient(cfg ProviderConfig, httpClient *http.Client, limiter *client.RateLimiterManager) *GenericValidator {
@@ -64,16 +67,40 @@ func (v *GenericValidator) SetCanaryCheck(check bool) {
 	v.checkCanary = check
 }
 
-func (v *GenericValidator) isCanaryToken(key string) bool {
-	if !v.checkCanary || len(v.config.CanaryPatterns) == 0 {
-		return false
-	}
+func (v *GenericValidator) SetCache(cache *client.ValidationCache) {
+	v.cache = cache
+}
 
+func (v *GenericValidator) FetchMetadata(ctx context.Context, apiKey string, result *models.ValidationResult) {
+	if result == nil || !result.IsValid {
+		return
+	}
+	v.fetchChainMetadata(ctx, apiKey, nil, result)
+}
+
+func (v *GenericValidator) compileCanaryPatterns() {
+	if v.canaryCompiled {
+		return
+	}
+	v.canaryCompiled = true
+	v.compiledCanaryRe = make([]*regexp.Regexp, 0, len(v.config.CanaryPatterns))
 	for _, p := range v.config.CanaryPatterns {
 		re, err := regexp.Compile(p)
 		if err != nil {
 			continue
 		}
+		v.compiledCanaryRe = append(v.compiledCanaryRe, re)
+	}
+}
+
+func (v *GenericValidator) isCanaryToken(key string) bool {
+	if !v.checkCanary || len(v.config.CanaryPatterns) == 0 {
+		return false
+	}
+
+	v.compileCanaryPatterns()
+
+	for _, re := range v.compiledCanaryRe {
 		if re.MatchString(key) {
 			return true
 		}
@@ -93,10 +120,10 @@ func (v *GenericValidator) performSyntaxCheck(key string) error {
 		if len(parts) == 2 {
 			toCheck = parts[1]
 		}
-		
+
 		toCheck = strings.TrimPrefix(toCheck, "sk_live_")
 		toCheck = strings.TrimPrefix(toCheck, "sk_test_")
-		
+
 		_, err := utils.Base64Decode(toCheck)
 		if err != nil {
 			return fmt.Errorf("invalid syntax: not a valid base64 string")
@@ -107,7 +134,7 @@ func (v *GenericValidator) performSyntaxCheck(key string) error {
 
 func (v *GenericValidator) categorizeInvalidKey(statusCode int, body []byte) string {
 	bodyStr := strings.ToLower(string(body))
-	
+
 	switch {
 	case strings.Contains(bodyStr, "expired"):
 		return "Expired"
@@ -122,8 +149,42 @@ func (v *GenericValidator) categorizeInvalidKey(statusCode int, body []byte) str
 	if statusCode == 401 || statusCode == 403 {
 		return "Invalid"
 	}
-	
+
 	return ""
+}
+
+func (v *GenericValidator) checkBodyError(bodyBytes []byte, result *models.ValidationResult) bool {
+	ec := v.config.Validation.ErrorCheck
+	if ec == nil || ec.JSONPath == "" {
+		return false
+	}
+
+	val := gjson.GetBytes(bodyBytes, ec.JSONPath)
+	if !val.Exists() {
+		return false
+	}
+
+	errVal := val.Int()
+	if errVal == 0 {
+		return false
+	}
+
+	result.IsValid = false
+	result.InvalidReason = "Invalid"
+
+	errMsgVal := gjson.GetBytes(bodyBytes, "base_resp.status_msg")
+	if errMsgVal.Exists() && errMsgVal.String() != "" {
+		result.ErrorMessage = errMsgVal.String()
+	} else {
+		errMsgVal = gjson.GetBytes(bodyBytes, "error.message")
+		if errMsgVal.Exists() {
+			result.ErrorMessage = errMsgVal.String()
+		} else {
+			result.ErrorMessage = fmt.Sprintf("API error code: %d", errVal)
+		}
+	}
+
+	return true
 }
 
 func (v *GenericValidator) Validate(ctx context.Context, apiKey string) (*models.ValidationResult, error) {
@@ -147,15 +208,139 @@ func (v *GenericValidator) Validate(ctx context.Context, apiKey string) (*models
 		}, nil
 	}
 
+	if v.cache != nil {
+		if cached, ok := v.cache.Get(v.Name(), apiKey); ok {
+			return cached, nil
+		}
+	}
+
+	cfg := v.config.Validation
+	endpoints := v.buildEndpointList(cfg)
+
+	var result *models.ValidationResult
+	var resultErr error
+
+	if len(endpoints) <= 1 {
+		result, resultErr = v.validateWithEndpoint(ctx, apiKey, cfg, endpoints[0])
+	} else {
+		type resultPair struct {
+			result *models.ValidationResult
+			err    error
+		}
+
+		resultChan := make(chan resultPair, len(endpoints))
+		var wg sync.WaitGroup
+
+		for _, ep := range endpoints {
+			wg.Add(1)
+			go func(endpoint endpointInfo) {
+				defer wg.Done()
+				r, e := v.validateWithEndpoint(ctx, apiKey, cfg, endpoint)
+				resultChan <- resultPair{result: r, err: e}
+			}(ep)
+		}
+
+		go func() {
+			wg.Wait()
+			close(resultChan)
+		}()
+
+		var validResult *models.ValidationResult
+		var firstErr error
+
+		for rp := range resultChan {
+			if rp.err != nil && firstErr == nil {
+				firstErr = rp.err
+			}
+			if rp.result != nil {
+				if rp.result.IsValid && validResult == nil {
+					validResult = rp.result
+				}
+			}
+		}
+
+		if validResult != nil {
+			result = validResult
+		} else if firstErr != nil {
+			resultErr = firstErr
+		}
+	}
+
+	if v.cache != nil && result != nil {
+		v.cache.Set(v.Name(), apiKey, result)
+	}
+
+	if result != nil {
+		return result, nil
+	}
+
+	if resultErr != nil {
+		return &models.ValidationResult{
+			Key:          apiKey,
+			Provider:     v.Name(),
+			IsValid:      false,
+			ErrorMessage: fmt.Sprintf("All endpoints failed: %v", resultErr),
+		}, nil
+	}
+
+	return &models.ValidationResult{
+		Key:          apiKey,
+		Provider:     v.Name(),
+		IsValid:      false,
+		ErrorMessage: "All endpoints failed",
+	}, nil
+}
+
+type endpointInfo struct {
+	url     string
+	headers map[string]string
+}
+
+func (v *GenericValidator) buildEndpointList(cfg ValidationConfig) []endpointInfo {
+	endpoints := []endpointInfo{}
+
+	if len(cfg.Endpoints) > 0 {
+		for _, ep := range cfg.Endpoints {
+			headers := make(map[string]string)
+			for k, val := range cfg.Headers {
+				headers[k] = val
+			}
+			for k, val := range ep.Headers {
+				headers[k] = val
+			}
+			endpoints = append(endpoints, endpointInfo{
+				url:     ep.URL,
+				headers: headers,
+			})
+		}
+	}
+
+	if cfg.URL != "" {
+		endpoints = append(endpoints, endpointInfo{
+			url:     cfg.URL,
+			headers: cfg.Headers,
+		})
+	}
+
+	if len(endpoints) == 0 {
+		endpoints = append(endpoints, endpointInfo{
+			url:     cfg.URL,
+			headers: cfg.Headers,
+		})
+	}
+
+	return endpoints
+}
+
+func (v *GenericValidator) validateWithEndpoint(ctx context.Context, apiKey string, cfg ValidationConfig, ep endpointInfo) (*models.ValidationResult, error) {
 	if v.limiter != nil {
 		if err := v.limiter.Wait(ctx, v.Name()); err != nil {
 			return nil, err
 		}
 	}
 	start := time.Now()
-	cfg := v.config.Validation
 
-	url := strings.ReplaceAll(cfg.URL, "{{key}}", apiKey)
+	url := strings.ReplaceAll(ep.url, "{{key}}", apiKey)
 
 	bodyStr := string(v.bodyBytes)
 	bodyStr = strings.ReplaceAll(bodyStr, "{{key}}", apiKey)
@@ -188,7 +373,7 @@ func (v *GenericValidator) Validate(ctx context.Context, apiKey string) (*models
 	if len(v.bodyBytes) > 0 {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	for k, val := range cfg.Headers {
+	for k, val := range ep.headers {
 		req.Header.Set(k, val)
 	}
 	req.Header.Set("User-Agent", client.GetRandomUserAgent())
@@ -199,6 +384,7 @@ func (v *GenericValidator) Validate(ctx context.Context, apiKey string) (*models
 	result := &models.ValidationResult{
 		Key:          apiKey,
 		Provider:     v.Name(),
+		Endpoint:     url,
 		ResponseTime: duration,
 	}
 
@@ -218,7 +404,7 @@ func (v *GenericValidator) Validate(ctx context.Context, apiKey string) (*models
 
 	result.StatusCode = resp.StatusCode
 	result.RetryAfter = utils.ParseRetryAfter(resp.Header)
-	bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, 10<<20))
+	bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
 		result.IsValid = false
 		result.ErrorMessage = fmt.Sprintf("Failed to read response body: %v", err)
@@ -227,6 +413,9 @@ func (v *GenericValidator) Validate(ctx context.Context, apiKey string) (*models
 
 	switch {
 	case resp.StatusCode == 200:
+		if v.checkBodyError(bodyBytes, result) {
+			break
+		}
 		result.IsValid = true
 		v.extractValidationMetadata(bodyBytes, result)
 		if !v.skipMetadata {
@@ -397,7 +586,6 @@ func (v *GenericValidator) fetchChainMetadata(ctx context.Context, apiKey string
 	var varsMu sync.Mutex
 	var resultMu sync.Mutex
 
-	
 	currentBatch := []MetadataConfig{}
 	producedInPreviousBatches := make(map[string]bool)
 	producedInPreviousBatches["key"] = true
@@ -420,7 +608,7 @@ func (v *GenericValidator) fetchChainMetadata(ctx context.Context, apiKey string
 			}
 			currentBatch = []MetadataConfig{}
 		}
-		
+
 		currentBatch = append(currentBatch, step)
 
 		if i == len(v.config.Metadata)-1 {
@@ -435,7 +623,7 @@ func (v *GenericValidator) runMetadataBatch(ctx context.Context, batch []Metadat
 		wg.Add(1)
 		go func(s MetadataConfig) {
 			defer wg.Done()
-			
+
 			varsMu.Lock()
 			url := s.URL
 			for k, val := range variables {
@@ -480,7 +668,7 @@ func (v *GenericValidator) runMetadataBatch(ctx context.Context, batch []Metadat
 			}
 			defer resp.Body.Close()
 
-			respBytes, err := io.ReadAll(io.LimitReader(resp.Body, 10<<20))
+			respBytes, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 			if err != nil {
 				return
 			}

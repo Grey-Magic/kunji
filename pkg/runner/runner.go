@@ -4,12 +4,12 @@ import (
 	"bufio"
 	"context"
 	"crypto/rand"
-	"crypto/sha256"
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
 	"io"
 	"math/big"
+	"net/url"
 	"os"
 	"os/signal"
 	"sort"
@@ -43,6 +43,8 @@ type Runner struct {
 	CanaryCheck      bool
 	Password         string
 	Bench            bool
+	Quiet            bool
+	Format           string
 	Factory          *validators.ValidatorFactory
 	Detector         *validators.Detector
 	ProxyRotator     *client.ProxyRotator
@@ -57,26 +59,25 @@ func NewRunner(threads int, proxy string, retries int, timeout int, out string, 
 		return nil, err
 	}
 
-
 	go client.WarmDNS(validators.GetCommonDomains())
 
 	return &Runner{
-		Threads:         threads,
-		Proxy:           proxy,
-		Retries:         retries,
-		Timeout:         timeout,
-		OutFile:         out,
-		ManualProvider:  strings.ToLower(manualProv),
-		ManualCategory:  strings.ToLower(manualCat),
-		Resume:          resume,
-		MinKeyLength:    4,
-		OnlyValid:       onlyValid,
-		MinBalance:      minBalance,
-		SkipMetadata:    skipMetadata,
-		CanaryCheck:     canaryCheck,
-		Factory:         factory,
-		Detector:        validators.NewDetectorFromConfigs(configs),
-		ProxyRotator:    rotator,
+		Threads:        threads,
+		Proxy:          proxy,
+		Retries:        retries,
+		Timeout:        timeout,
+		OutFile:        out,
+		ManualProvider: strings.ToLower(manualProv),
+		ManualCategory: strings.ToLower(manualCat),
+		Resume:         resume,
+		MinKeyLength:   4,
+		OnlyValid:      onlyValid,
+		MinBalance:     minBalance,
+		SkipMetadata:   skipMetadata,
+		CanaryCheck:    canaryCheck,
+		Factory:        factory,
+		Detector:       validators.NewDetectorFromConfigs(configs),
+		ProxyRotator:   rotator,
 	}, nil
 }
 
@@ -90,7 +91,7 @@ func (r *Runner) GetKeyStream(singleKey, keyFile string) (io.ReadCloser, int, er
 		if err != nil {
 			return nil, 0, err
 		}
-		
+
 		count := 0
 		scanner := bufio.NewScanner(file)
 		for scanner.Scan() {
@@ -108,7 +109,7 @@ func (r *Runner) GetKeyStream(singleKey, keyFile string) (io.ReadCloser, int, er
 		if err != nil {
 			return nil, 0, fmt.Errorf("failed to create temp file for stdin: %w", err)
 		}
-		
+
 		count := 0
 		scanner := bufio.NewScanner(os.Stdin)
 		for scanner.Scan() {
@@ -126,13 +127,16 @@ func (r *Runner) GetKeyStream(singleKey, keyFile string) (io.ReadCloser, int, er
 }
 
 func (r *Runner) PreflightProxyCheck() {
+	if r.Quiet || r.Format == "json" {
+		return
+	}
 	if r.ProxyRotator == nil {
 		return
 	}
 
 	spinner, _ := pterm.DefaultSpinner.Start("Checking proxy health...")
 	deadCount := r.ProxyRotator.FilterDeadProxies(r.Timeout)
-	
+
 	if deadCount > 0 {
 		spinner.Warning(fmt.Sprintf("Discarded %d dead proxies. Continuing with remaining proxies.", deadCount))
 	} else {
@@ -141,7 +145,9 @@ func (r *Runner) PreflightProxyCheck() {
 }
 
 func (r *Runner) Run(keyReader io.Reader, totalKeys int) {
-	pterm.Success.Printfln("Streaming %d deduplicated and well-formatted keys...", totalKeys)
+	if !r.Quiet && r.Format != "json" {
+		pterm.Success.Printfln("Streaming %d deduplicated and well-formatted keys...", totalKeys)
+	}
 
 	bufferSize := 1000
 	if totalKeys < bufferSize {
@@ -166,7 +172,6 @@ func (r *Runner) Run(keyReader io.Reader, totalKeys int) {
 		go r.worker(jobs, results, &wg)
 	}
 
-
 	metadataThreadCount := numWorkers / 2
 	if metadataThreadCount < 1 {
 		metadataThreadCount = 1
@@ -190,14 +195,14 @@ func (r *Runner) Run(keyReader io.Reader, totalKeys int) {
 
 	go func() {
 		defer closeJobs()
-		
-		alreadyProcessed := make(map[string]bool)
+
+		alreadyProcessed := utils.NewBloomFilter(10000000, 0.001)
 		if r.Resume {
 			alreadyProcessed = r.loadExistingKeys()
 		}
 
 		uniqueKeys := utils.NewBloomFilter(10000000, 0.001)
-		
+
 		scanner := bufio.NewScanner(keyReader)
 		for scanner.Scan() {
 			key := strings.TrimSpace(scanner.Text())
@@ -210,11 +215,8 @@ func (r *Runner) Run(keyReader io.Reader, totalKeys int) {
 			}
 			uniqueKeys.Add(key)
 
-			if r.Resume {
-				h := r.hashKey(key)
-				if alreadyProcessed[h] {
-					continue
-				}
+			if r.Resume && alreadyProcessed.Test(key) {
+				continue
 			}
 
 			select {
@@ -237,7 +239,7 @@ func (r *Runner) Run(keyReader io.Reader, totalKeys int) {
 	validCount := 0
 
 	var p *pterm.ProgressbarPrinter
-	showUI := totalKeys > 1
+	showUI := totalKeys > 1 && !r.Quiet
 	if showUI {
 		pp := pterm.DefaultProgressbar.WithTotal(totalKeys).WithTitle("Validating API Keys")
 		p, _ = pp.Start()
@@ -256,7 +258,7 @@ func (r *Runner) Run(keyReader io.Reader, totalKeys int) {
 	shouldWriteHeader := r.shouldWriteHeader()
 
 	if shouldWriteHeader && csvWriter != nil {
-		if err := csvWriter.Write([]string{"Key", "Provider", "IsValid", "StatusCode", "ResponseTime", "Balance", "AccountName", "Email", "Error"}); err != nil {
+		if err := csvWriter.Write([]string{"Key", "Provider", "Endpoint", "IsValid", "StatusCode", "ResponseTime", "Balance", "AccountName", "Email", "Error"}); err != nil {
 			pterm.Warning.Printfln("Failed to write CSV header: %v", err)
 		}
 		csvWriter.Flush()
@@ -269,7 +271,7 @@ func (r *Runner) Run(keyReader io.Reader, totalKeys int) {
 	updateCounterMutex := sync.Mutex{}
 	var progressTicker *time.Ticker
 	if showUI {
-		progressTicker = time.NewTicker(100 * time.Millisecond)
+		progressTicker = time.NewTicker(500 * time.Millisecond)
 		defer progressTicker.Stop()
 	}
 
@@ -339,7 +341,13 @@ func (r *Runner) Run(keyReader io.Reader, totalKeys int) {
 			}
 
 			if shouldKeep {
-				if r.OutFile != "" {
+				if r.Format == "json" {
+					b, _ := json.Marshal(res)
+					fmt.Println(string(b))
+					if r.OutFile != "" && r.OutFile != "stdout" {
+						allResults = append(allResults, *res)
+					}
+				} else if r.OutFile != "" {
 					if collectAllResults || r.Password != "" {
 						allResults = append(allResults, *res)
 					}
@@ -361,15 +369,19 @@ done:
 		area.Stop()
 	}
 
-	pterm.Println()
+	if !r.Quiet && r.Format != "json" {
+		pterm.Println()
+	}
 
 	if csvWriter != nil {
 		csvWriter.Flush()
 	}
 
-	if r.OutFile != "" {
+	if r.OutFile != "" && r.Format != "json" {
 		r.exportResults(allResults)
-	} else if len(allResults) > 0 {
+	} else if r.Format == "json" && r.OutFile != "" && r.OutFile != "stdout" {
+		r.exportResults(allResults)
+	} else if len(allResults) > 0 && !r.Quiet && r.Format != "json" {
 		r.displayResultsTable(allResults)
 	}
 
@@ -395,10 +407,12 @@ done:
 		{"Total Time", duration.Round(time.Millisecond).String()},
 	}
 
-	pterm.DefaultSection.Println("Validation Summary")
-	summaryTable, _ := pterm.DefaultTable.WithHasHeader().WithData(stats).Srender()
-	pterm.DefaultBox.WithTitle("Results").Println(summaryTable)
-	pterm.Println()
+	if !r.Quiet && r.Format != "json" {
+		pterm.DefaultSection.Println("Validation Summary")
+		summaryTable, _ := pterm.DefaultTable.WithHasHeader().WithData(stats).Srender()
+		pterm.DefaultBox.WithTitle("Results").Println(summaryTable)
+		pterm.Println()
+	}
 }
 
 func (r *Runner) worker(jobs <-chan string, results chan<- *models.ValidationResult, wg *sync.WaitGroup) {
@@ -448,7 +462,7 @@ func (r *Runner) worker(jobs <-chan string, results chan<- *models.ValidationRes
 				val.SetSkipMetadata(true)
 				val.SetCanaryCheck(r.CanaryCheck)
 				res := r.validateWithRetries(val, key, providersToTry[0])
-				
+
 				if res.IsValid && !r.SkipMetadata {
 					r.metadataWg.Add(1)
 					select {
@@ -478,7 +492,7 @@ func (r *Runner) worker(jobs <-chan string, results chan<- *models.ValidationRes
 				}
 				val.SetSkipMetadata(true)
 				val.SetCanaryCheck(r.CanaryCheck)
-				
+
 				res := r.validateWithRetriesWithContext(ctx, val, key, name)
 				if res.IsValid {
 					cancel()
@@ -500,7 +514,8 @@ func (r *Runner) worker(jobs <-chan string, results chan<- *models.ValidationRes
 			}
 			if res.IsValid {
 				go func() {
-					for range probeResults {}
+					for range probeResults {
+					}
 				}()
 				break
 			}
@@ -524,19 +539,9 @@ func (r *Runner) metadataWorker(results chan<- *models.ValidationResult) {
 	for res := range r.metadataJobs {
 		val, exists := r.Factory.GetValidator(res.Provider)
 		if exists {
-
-
-
-			val.SetSkipMetadata(false)
-			enriched, err := val.Validate(context.Background(), res.Key)
-			if err == nil {
-				results <- enriched
-			} else {
-				results <- res
-			}
-		} else {
-			results <- res
+			val.FetchMetadata(context.Background(), res.Key, res)
 		}
+		results <- res
 		r.metadataWg.Done()
 	}
 }
@@ -657,6 +662,7 @@ func (r *Runner) writeResult(f *os.File, cw *csv.Writer, res *models.ValidationR
 		cw.Write([]string{
 			res.Key,
 			res.Provider,
+			res.Endpoint,
 			fmt.Sprintf("%t", res.IsValid),
 			fmt.Sprintf("%d", res.StatusCode),
 			fmt.Sprintf("%.2f", res.ResponseTime),
@@ -770,7 +776,7 @@ func (r *Runner) getNumericQuota(res models.ValidationResult) float64 {
 
 func (r *Runner) displayValidKeysTable(results []models.ValidationResult) {
 	tableData := pterm.TableData{
-		{"Provider", "Key", "Status", "Response", "Balance", "Account / Email"},
+		{"Provider", "Endpoint", "Key", "Status", "Response", "Balance", "Account / Email"},
 	}
 
 	for _, res := range results {
@@ -845,8 +851,22 @@ func (r *Runner) displayValidKeysTable(results []models.ValidationResult) {
 			}
 		}
 
+		endpointDisplay := res.Endpoint
+		if len(endpointDisplay) > 30 {
+			u, err := url.Parse(res.Endpoint)
+			if err == nil {
+				endpointDisplay = u.Host + u.Path
+				if len(endpointDisplay) > 30 {
+					endpointDisplay = endpointDisplay[:27] + "..."
+				}
+			} else if len(endpointDisplay) > 30 {
+				endpointDisplay = endpointDisplay[:27] + "..."
+			}
+		}
+
 		tableData = append(tableData, []string{
 			pterm.Cyan(res.Provider),
+			pterm.Gray(endpointDisplay),
 			keyMasked,
 			statusStr,
 			responseStr,
@@ -893,7 +913,7 @@ func (r *Runner) displayValidKeysTable(results []models.ValidationResult) {
 
 func (r *Runner) displayInvalidKeysTable(results []models.ValidationResult) {
 	tableData := pterm.TableData{
-		{"Provider", "Key", "Status", "Reason", "Error"},
+		{"Provider", "Endpoint", "Key", "Status", "Reason", "Error"},
 	}
 
 	for _, res := range results {
@@ -947,8 +967,22 @@ func (r *Runner) displayInvalidKeysTable(results []models.ValidationResult) {
 			}
 		}
 
+		endpointDisplay := res.Endpoint
+		if len(endpointDisplay) > 30 {
+			u, err := url.Parse(res.Endpoint)
+			if err == nil {
+				endpointDisplay = u.Host + u.Path
+				if len(endpointDisplay) > 30 {
+					endpointDisplay = endpointDisplay[:27] + "..."
+				}
+			} else if len(endpointDisplay) > 30 {
+				endpointDisplay = endpointDisplay[:27] + "..."
+			}
+		}
+
 		tableData = append(tableData, []string{
 			pterm.Cyan(res.Provider),
+			pterm.Gray(endpointDisplay),
 			keyMasked,
 			statusStr,
 			res.InvalidReason,
@@ -1070,8 +1104,8 @@ func tolower(s string) string {
 	return strings.ToLower(s)
 }
 
-func (r *Runner) loadExistingKeys() map[string]bool {
-	existing := make(map[string]bool)
+func (r *Runner) loadExistingKeys() *utils.BloomFilter {
+	existing := utils.NewBloomFilter(10000000, 0.001)
 	if r.OutFile == "" {
 		return existing
 	}
@@ -1094,7 +1128,7 @@ func (r *Runner) loadExistingKeys() map[string]bool {
 		var results []models.ValidationResult
 		if err := json.Unmarshal(data, &results); err == nil {
 			for _, res := range results {
-				existing[r.hashKey(res.Key)] = true
+				existing.Add(res.Key)
 			}
 		}
 		return existing
@@ -1110,7 +1144,7 @@ func (r *Runner) loadExistingKeys() map[string]bool {
 			}
 			var res models.ValidationResult
 			if err := json.Unmarshal([]byte(line), &res); err == nil {
-				existing[r.hashKey(res.Key)] = true
+				existing.Add(res.Key)
 			}
 		}
 		return existing
@@ -1125,7 +1159,7 @@ func (r *Runner) loadExistingKeys() map[string]bool {
 				break
 			}
 			if err == nil && len(record) > 0 {
-				existing[r.hashKey(record[0])] = true
+				existing.Add(record[0])
 			}
 		}
 		return existing
@@ -1134,15 +1168,11 @@ func (r *Runner) loadExistingKeys() map[string]bool {
 	for _, line := range lines {
 		key := strings.TrimSpace(line)
 		if key != "" {
-			existing[r.hashKey(key)] = true
+			existing.Add(key)
 		}
 	}
 
 	return existing
-}
-
-func (r *Runner) hashKey(key string) string {
-	return fmt.Sprintf("%x", sha256.Sum256([]byte(key)))
 }
 
 func (r *Runner) addJitter(d time.Duration) time.Duration {

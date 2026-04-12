@@ -47,26 +47,37 @@ type MetadataFromValidation struct {
 	RegexExtractMatch   int    `yaml:"regex_extract_match"`
 }
 
-type ValidationConfig struct {
-	Method  string            `yaml:"method"`
+type EndpointConfig struct {
 	URL     string            `yaml:"url"`
-	Auth    string            `yaml:"auth"`
-	Headers map[string]string `yaml:"headers"`
-	Body    string            `yaml:"body"`
+	Region  string            `yaml:"region,omitempty"`
+	Headers map[string]string `yaml:"headers,omitempty"`
+}
+
+type ErrorCheck struct {
+	JSONPath string `yaml:"json_path,omitempty"`
+}
+
+type ValidationConfig struct {
+	Method     string            `yaml:"method"`
+	URL        string            `yaml:"url"`
+	Auth       string            `yaml:"auth"`
+	Headers    map[string]string `yaml:"headers"`
+	Body       string            `yaml:"body"`
+	Endpoints  []EndpointConfig  `yaml:"endpoints,omitempty"`
+	ErrorCheck *ErrorCheck       `yaml:"error_check,omitempty"`
 }
 
 type ProviderConfig struct {
-	Name                    string                  `yaml:"name"`
-	Category                string                  `yaml:"category"`
-	KeyPrefixes             []string                `yaml:"key_prefixes"`
-	KeyPatterns             []string                `yaml:"key_patterns"`
-	SyntaxCheck             string                  `yaml:"syntax_check,omitempty"`
-	CanaryPatterns          []string                `yaml:"canary_patterns,omitempty"`
-	Validation              ValidationConfig        `yaml:"validation"`
-	Metadata                []MetadataConfig        `yaml:"metadata,omitempty"`
-	MetadataFromValidation  *MetadataFromValidation `yaml:"metadata_from_validation,omitempty"`
+	Name                   string                  `yaml:"name"`
+	Category               string                  `yaml:"category"`
+	KeyPrefixes            []string                `yaml:"key_prefixes"`
+	KeyPatterns            []string                `yaml:"key_patterns"`
+	SyntaxCheck            string                  `yaml:"syntax_check,omitempty"`
+	CanaryPatterns         []string                `yaml:"canary_patterns,omitempty"`
+	Validation             ValidationConfig        `yaml:"validation"`
+	Metadata               []MetadataConfig        `yaml:"metadata,omitempty"`
+	MetadataFromValidation *MetadataFromValidation `yaml:"metadata_from_validation,omitempty"`
 }
-
 
 var (
 	configsCache       []ProviderConfig
@@ -172,9 +183,9 @@ type PatternEntry struct {
 type PrefixIndex map[string][]PrefixEntry
 
 type DetectorIndex struct {
-	prefixes  []PrefixEntry
-	patterns  []PatternEntry
-	prefixMap PrefixIndex
+	prefixes         []PrefixEntry
+	patterns         []PatternEntry
+	prefixMap        PrefixIndex
 	providerPatterns map[string][]*regexp.Regexp
 }
 

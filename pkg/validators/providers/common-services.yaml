@@ -57,6 +57,27 @@
       extract: "settings.dashboard.display_name"
       store_as: "name"
 
+- name: stripe_restricted
+  category: payments
+  key_prefixes: ["rk_live_", "rk_test_"]
+  key_patterns: ["(?i)^rk_(live|test)_[a-zA-Z0-9]{24,99}$"]
+  syntax_check: base64
+  validation:
+    method: GET
+    url: "https://api.stripe.com/v1/charges?limit=1"
+    auth: "basic"
+  metadata:
+    - method: GET
+      url: "https://api.stripe.com/v1/account"
+      auth: "basic"
+      extract: "email"
+      store_as: "email"
+    - method: GET
+      url: "https://api.stripe.com/v1/account"
+      auth: "basic"
+      extract: "settings.dashboard.display_name"
+      store_as: "name"
+
 - name: cloudflare
   category: infrastructure
   key_prefixes: ["cloudflare_"]
@@ -2592,3 +2613,945 @@
     headers:
       Content-Type: "application/json"
     body: '{"query":"{ __schema { types { name } } }"}'
+
+- name: quay
+  category: container
+  key_patterns: ["^[A-Za-z0-9]{30,60}$"]
+  validation:
+    method: GET
+    url: "https://quay.io/api/v1/user/"
+    auth: "bearer"
+  metadata_from_validation:
+    name_path: "username"
+    email_path: "email"
+
+- name: backblaze_b2
+  category: storage
+  key_patterns: ["^[0-9a-zA-Z]{12,20}:[a-zA-Z0-9+/=_-]{20,60}$"]
+  validation:
+    method: GET
+    url: "https://api.backblazeb2.com/b2api/v4/b2_authorize_account"
+    auth: "basic_composite"
+  metadata_from_validation:
+    name_path: "accountId"
+
+- name: ably
+  category: communication
+  key_patterns: ["^[a-zA-Z0-9]{4,8}\\.[a-zA-Z0-9]{4,8}:[a-zA-Z0-9_-]{20,60}$"]
+  validation:
+    method: GET
+    url: "https://rest.ably.io/time"
+    auth: "basic_composite"
+
+- name: ns1
+  category: dns
+  key_patterns: ["^[a-f0-9]{64}$"]
+  validation:
+    method: GET
+    url: "https://api.nsone.net/v1/zones"
+    auth: "header:X-NSONE-Key"
+  metadata_from_validation:
+    name_path: "0.name"
+
+- name: fastly
+  category: cdn
+  key_patterns: ["^[a-zA-Z0-9]{30,40}$"]
+  validation:
+    method: GET
+    url: "https://api.fastly.com/current_customer"
+    auth: "header:Fastly-Key"
+  metadata_from_validation:
+    name_path: "name"
+    email_path: "billing_contact.email"
+
+- name: pipedrive
+  category: crm
+  key_patterns: ["^[a-f0-9]{40}$"]
+  validation:
+    method: GET
+    url: "https://api.pipedrive.com/v1/users/me"
+    auth: "query:api_token"
+  metadata_from_validation:
+    name_path: "data.name"
+    email_path: "data.email"
+
+- name: close
+  category: crm
+  key_prefixes: ["close_"]
+  key_patterns: ["^close_[a-zA-Z0-9_-]{20,}$", "^[a-zA-Z0-9_-]{20,40}$"]
+  validation:
+    method: GET
+    url: "https://api.close.com/api/v1/me/"
+    auth: "basic"
+  metadata_from_validation:
+    name_path: "first_name"
+    email_path: "email"
+
+- name: messagebird
+  category: communication
+  key_prefixes: ["live_", "test_"]
+  key_patterns: ["^(live|test)_[a-zA-Z0-9]{20,40}$"]
+  validation:
+    method: GET
+    url: "https://rest.messagebird.com/balance"
+    auth: "header:Access-Key"
+  metadata_from_validation:
+    balance_path: "amount"
+
+- name: abuseipdb
+  category: security
+  key_patterns: ["^[a-zA-Z0-9]{60,100}$"]
+  validation:
+    method: GET
+    url: "https://api.abuseipdb.com/api/v2/check?ipAddress=8.8.8.8"
+    auth: "header:Key"
+
+- name: greynoise
+  category: security
+  key_prefixes: ["gn_"]
+  key_patterns: ["^gn_[a-zA-Z0-9_-]{20,}$", "^[a-zA-Z0-9_-]{20,40}$"]
+  validation:
+    method: GET
+    url: "https://api.greynoise.io/v3/community/8.8.8.8"
+    auth: "header:key"
+
+- name: securitytrails
+  category: security
+  key_prefixes: ["st_"]
+  key_patterns: ["^st_[a-zA-Z0-9_-]{20,}$", "^[a-f0-9]{32}$"]
+  validation:
+    method: GET
+    url: "https://api.securitytrails.com/v1/ping"
+    auth: "header:apikey"
+  metadata_from_validation:
+    name_path: "username"
+
+- name: ipinfo
+  category: api
+  key_patterns: ["^[a-f0-9]{20,40}$"]
+  validation:
+    method: GET
+    url: "https://ipinfo.io/me"
+    auth: "bearer"
+
+- name: ipqualityscore
+  category: security
+  key_patterns: ["^[a-zA-Z0-9]{10,30}_[a-zA-Z0-9]{10,30}$"]
+  validation:
+    method: GET
+    url: "https://www.ipqualityscore.com/api/json/ip/{{key}}/8.8.8.8"
+    auth: "none"
+  metadata_from_validation:
+    name_path: "message"
+
+- name: hunter
+  category: api
+  key_prefixes: ["hunter_"]
+  key_patterns: ["^hunter_[a-zA-Z0-9_-]{20,}$", "^[a-f0-9]{40}$"]
+  validation:
+    method: GET
+    url: "https://api.hunter.io/v2/account"
+    auth: "query:api_key"
+  metadata_from_validation:
+    name_path: "data.first_name"
+    email_path: "data.email"
+
+- name: onesignal
+  category: communication
+  key_prefixes: ["os_"]
+  key_patterns: ["^os_[a-zA-Z0-9_-]{30,}$", "^[a-f0-9]{40}$"]
+  validation:
+    method: GET
+    url: "https://onesignal.com/api/v1/apps"
+    auth: "basic"
+  metadata_from_validation:
+    name_path: "0.name"
+
+- name: svix
+  category: communication
+  key_prefixes: ["sk_live_", "sk_test_"]
+  key_patterns: ["^sk_(live|test)_[a-zA-Z0-9._-]{20,}$"]
+  validation:
+    method: GET
+    url: "https://api.svix.com/api/v1/app"
+    auth: "bearer"
+  metadata_from_validation:
+    name_path: "data.0.name"
+
+- name: radar
+  category: api
+  key_prefixes: ["prj_live_sk_", "prj_test_sk_", "prj_live_pk_", "prj_test_pk_"]
+  key_patterns: ["^prj_(live|test)_(sk|pk)_[a-zA-Z0-9_-]{20,}$"]
+  validation:
+    method: GET
+    url: "https://api.radar.io/v1/geocode/ip"
+    auth: "bearer"
+  metadata_from_validation:
+    name_path: "address.city"
+
+- name: formspree
+  category: api
+  key_prefixes: ["fsr_"]
+  key_patterns: ["^fsr_[a-zA-Z0-9_-]{20,}$"]
+  validation:
+    method: GET
+    url: "https://formspree.io/api/v1/forms"
+    auth: "bearer"
+  metadata_from_validation:
+    name_path: "0.name"
+
+- name: mailtrap
+  category: email
+  key_prefixes: ["mt_"]
+  key_patterns: ["^mt_[a-zA-Z0-9_-]{20,}$"]
+  validation:
+    method: GET
+    url: "https://mailtrap.io/api/accounts"
+    auth: "bearer"
+  metadata_from_validation:
+    name_path: "0.name"
+
+- name: scrapingbee
+  category: api
+  key_prefixes: ["sb_"]
+  key_patterns: ["^sb_[a-zA-Z0-9_-]{20,}$"]
+  validation:
+    method: GET
+    url: "https://app.scrapingbee.com/api/v1/?api_key={{key}}&url=https://example.com"
+    auth: "none"
+
+- name: screenshotone
+  category: api
+  key_prefixes: ["so_"]
+  key_patterns: ["^so_[a-zA-Z0-9_-]{20,}$"]
+  validation:
+    method: GET
+    url: "https://api.screenshotone.com/take?url=https://example.com&access_key={{key}}"
+    auth: "none"
+
+- name: customerio
+  category: email
+  key_patterns: ["^[a-zA-Z0-9]{8,12}:[a-f0-9]{20,40}$"]
+  validation:
+    method: GET
+    url: "https://track.customer.io/api/v1/accounts"
+    auth: "basic_composite"
+
+- name: plunk
+  category: email
+  key_prefixes: ["plln_sk_", "plln_pk_", "sk_plnk_", "pk_plnk_"]
+  key_patterns: ["^(plln_(sk|pk)|sk_plnk|pk_plnk)_[a-zA-Z0-9_-]{20,}$"]
+  validation:
+    method: GET
+    url: "https://api.useplunk.com/v1/"
+    auth: "bearer"
+
+- name: coinmarketcap
+  category: blockchain
+  key_prefixes: ["cmc_"]
+  key_patterns: ["^cmc_[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$", "^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$"]
+  validation:
+    method: GET
+    url: "https://pro-api.coinmarketcap.com/v1/key/info"
+    auth: "header:X-CMC_PRO_API_KEY"
+  metadata_from_validation:
+    name_path: "data.plan.name"
+
+- name: weatherapi
+  category: api
+  key_prefixes: ["wa_"]
+  key_patterns: ["^wa_[a-zA-Z0-9_-]{20,}$"]
+  validation:
+    method: GET
+    url: "https://api.weatherapi.com/v1/current.json?key={{key}}&q=London"
+    auth: "none"
+  metadata_from_validation:
+    name_path: "location.name"
+
+- name: todoist
+  category: productivity
+  key_prefixes: ["td_"]
+  key_patterns: ["^td_[a-f0-9]{20,}$"]
+  validation:
+    method: GET
+    url: "https://api.todoist.com/rest/v2/projects"
+    auth: "bearer"
+  metadata_from_validation:
+    name_path: "0.name"
+
+- name: fathom
+  category: analytics
+  key_prefixes: ["fth_"]
+  key_patterns: ["^fth_[a-zA-Z0-9_-]{20,}$"]
+  validation:
+    method: GET
+    url: "https://api.usefathom.com/v1/sites"
+    auth: "bearer"
+  metadata_from_validation:
+    name_path: "data.0.name"
+
+- name: plausible
+  category: analytics
+  key_prefixes: ["pls_"]
+  key_patterns: ["^pls_[a-zA-Z0-9_-]{20,}$"]
+  validation:
+    method: GET
+    url: "https://plausible.io/api/v1/sites"
+    auth: "bearer"
+  metadata_from_validation:
+    name_path: "0.domain"
+
+- name: bunny
+  category: cdn
+  key_prefixes: ["bny_"]
+  key_patterns: ["^bny_[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$"]
+  validation:
+    method: GET
+    url: "https://api.bunny.net/dnszone"
+    auth: "header:AccessKey"
+
+- name: imagekit
+  category: api
+  key_prefixes: ["ik_"]
+  key_patterns: ["^ik_[a-zA-Z0-9+/=_-]{30,}$"]
+  validation:
+    method: GET
+    url: "https://api.imagekit.io/v1/files"
+    auth: "basic"
+
+- name: mailersend
+  category: email
+  key_prefixes: ["mlsn_"]
+  key_patterns: ["^mlsn_[a-zA-Z0-9._-]{20,}$"]
+  validation:
+    method: GET
+    url: "https://api.mailersend.com/v1/domains"
+    auth: "bearer"
+  metadata_from_validation:
+    name_path: "data.0.name"
+
+- name: mailjet
+  category: email
+  key_patterns: ["^[a-f0-9]{32}:[a-f0-9]{32}$"]
+  validation:
+    method: GET
+    url: "https://api.mailjet.com/v3/REST/account"
+    auth: "basic_composite"
+  metadata_from_validation:
+    name_path: "Data.0.Name"
+    email_path: "Data.0.Email"
+
+- name: sparkpost
+  category: email
+  key_prefixes: ["sp_"]
+  key_patterns: ["^sp_[a-f0-9]{20,}$"]
+  validation:
+    method: GET
+    url: "https://api.sparkpost.com/api/v1/account"
+    auth: "bearer"
+  metadata_from_validation:
+    name_path: "results.company_name"
+
+- name: convertkit
+  category: email
+  key_prefixes: ["ck_"]
+  key_patterns: ["^ck_[a-f0-9]{20,}$"]
+  validation:
+    method: GET
+    url: "https://api.convertkit.com/v3/account"
+    auth: "query:api_key"
+  metadata_from_validation:
+    name_path: "account.name"
+    email_path: "account.primary_email_address"
+
+- name: here_maps
+  category: api
+  key_prefixes: ["here_"]
+  key_patterns: ["^here_[a-zA-Z0-9_-]{30,}$"]
+  validation:
+    method: GET
+    url: "https://geocode.search.hereapi.com/v1/geocode?q=London&apiKey={{key}}"
+    auth: "none"
+
+- name: recaptcha_secret
+  category: security
+  key_prefixes: []
+  key_patterns: ["^[a-zA-Z0-9_-]{40}$"]
+  validation:
+    method: POST
+    url: "https://www.google.com/recaptcha/api/siteverify"
+    auth: "none"
+    headers:
+      Content-Type: "application/x-www-form-urlencoded"
+    body: "secret={{key}}&response=invalid_dummy_token"
+  metadata_from_validation:
+    name_path: "error-codes.0"
+
+- name: duffel
+  category: api
+  key_prefixes: ["duffel_test_", "duffel_live_"]
+  key_patterns: ["^duffel_(test|live)_[a-zA-Z0-9_-]{20,}$"]
+  validation:
+    method: GET
+    url: "https://api.duffel.com/air/airlines"
+    auth: "bearer"
+    headers:
+      Accept: "application/json"
+      Duffel-Version: "v1"
+
+- name: postman
+  category: developer
+  key_prefixes: ["PMAK-"]
+  key_patterns: ["^PMAK-[a-zA-Z0-9_-]{20,}$"]
+  validation:
+    method: GET
+    url: "https://api.getpostman.com/me"
+    auth: "header:X-API-Key"
+  metadata_from_validation:
+    name_path: "user.name"
+    email_path: "user.email"
+
+- name: readme
+  category: developer
+  key_prefixes: ["rdme_"]
+  key_patterns: ["^rdme_[a-zA-Z0-9_-]{20,}$"]
+  validation:
+    method: GET
+    url: "https://api.readme.com/v2/projects"
+    auth: "bearer"
+  metadata_from_validation:
+    name_path: "0.name"
+
+- name: adyen
+  category: payments
+  key_prefixes: []
+  key_patterns: ["^[a-zA-Z0-9]{64,88}$"]
+  validation:
+    method: GET
+    url: "https://management-live.adyen.com/v3/me"
+    auth: "header:x-api-key"
+  metadata_from_validation:
+    name_path: "companyName"
+    email_path: "email"
+
+- name: checkout_com
+  category: payments
+  key_prefixes: ["sk_test_", "sk_live_", "pk_test_", "pk_live_"]
+  key_patterns: ["^(sk|pk)_(test|live)_[a-zA-Z0-9_-]{20,}$"]
+  validation:
+    method: GET
+    url: "https://api.checkout.com/external/credentials"
+    auth: "bearer"
+
+- name: assemblyai
+  category: ai
+  key_prefixes: []
+  key_patterns: ["^[a-f0-9]{32}$"]
+  validation:
+    method: GET
+    url: "https://api.assemblyai.com/v2/account"
+    auth: "bearer"
+  metadata_from_validation:
+    name_path: "email"
+    balance_path: "credit_balance"
+
+- name: deepgram
+  category: ai
+  key_prefixes: []
+  key_patterns: ["^[a-f0-9]{40,64}$"]
+  validation:
+    method: GET
+    url: "https://api.deepgram.com/v1/projects"
+    auth: "header:Authorization"
+    headers:
+      Authorization: "Token {{key}}"
+  metadata_from_validation:
+    name_path: "0.name"
+
+- name: stability_ai
+  category: ai
+  key_prefixes: ["sk-"]
+  key_patterns: ["^sk-[a-zA-Z0-9]{40,}$"]
+  validation:
+    method: GET
+    url: "https://api.stability.ai/v1/user/balance"
+    auth: "bearer"
+  metadata_from_validation:
+    balance_path: "credits"
+
+- name: clearbit
+  category: api
+  key_prefixes: []
+  key_patterns: ["^[a-f0-9]{32,40}$", "^sk_[a-f0-9]{32}$"]
+  validation:
+    method: GET
+    url: "https://person.clearbit.com/v2/people/find?email=alex@alexmaccaw.com"
+    auth: "basic"
+
+- name: rollbar
+  category: monitoring
+  key_prefixes: ["pk_", "ps_", "pr_", "pw_"]
+  key_patterns: ["^(pk|ps|pr|pw)_[a-f0-9]{32}$"]
+  validation:
+    method: GET
+    url: "https://api.rollbar.com/api/1/items/?access_token={{key}}"
+    auth: "none"
+  metadata_from_validation:
+    name_path: "result.items.0.title"
+
+- name: crowdin
+  category: localization
+  key_prefixes: []
+  key_patterns: ["^[a-f0-9]{40}$"]
+  validation:
+    method: GET
+    url: "https://api.crowdin.com/api/v2/user"
+    auth: "bearer"
+  metadata_from_validation:
+    name_path: "data.username"
+    email_path: "data.email"
+
+- name: cal_com
+  category: productivity
+  key_prefixes: ["cal_", "cal_live_"]
+  key_patterns: ["^cal_(live_)?[a-zA-Z0-9_-]{20,}$"]
+  validation:
+    method: GET
+    url: "https://api.cal.com/v2/me"
+    auth: "bearer"
+    headers:
+      cal-api-version: "2024-08-13"
+  metadata_from_validation:
+    name_path: "data.name"
+    email_path: "data.email"
+
+- name: jotform
+  category: api
+  key_prefixes: []
+  key_patterns: ["^[a-f0-9]{32}$", "^[a-zA-Z0-9]{20,40}$"]
+  validation:
+    method: GET
+    url: "https://api.jotform.com/user?apiKey={{key}}"
+    auth: "none"
+  metadata_from_validation:
+    name_path: "content.username"
+    email_path: "content.email"
+
+- name: typeform
+  category: api
+  key_prefixes: ["tfp_", "tfa_"]
+  key_patterns: ["^tf[pas]_[a-zA-Z0-9_-]{20,}$", "^[a-f0-9]{40}$"]
+  validation:
+    method: GET
+    url: "https://api.typeform.com/me"
+    auth: "bearer"
+  metadata_from_validation:
+    name_path: "alias"
+    email_path: "email"
+
+- name: hookdeck
+  category: developer
+  key_prefixes: ["hkdk_"]
+  key_patterns: ["^hkdk_[a-zA-Z0-9_-]{20,}$"]
+  validation:
+    method: GET
+    url: "https://api.hookdeck.com/2024-03-01/connections"
+    auth: "bearer"
+  metadata_from_validation:
+    name_path: "0.name"
+
+- name: airship
+  category: communication
+  key_prefixes: []
+  key_patterns: ["^[a-zA-Z0-9]{20,30}:[a-zA-Z0-9]{20,40}$"]
+  validation:
+    method: GET
+    url: "https://go.airship.com/api/channels/samples"
+    auth: "basic_composite"
+
+- name: apollo
+  category: api
+  key_prefixes: []
+  key_patterns: ["^[a-f0-9]{32}$", "^[a-zA-Z0-9_-]{40,60}$"]
+  validation:
+    method: GET
+    url: "https://api.apollo.io/v1/users/search"
+    auth: "header:Authorization"
+    headers:
+      Authorization: "Bearer {{key}}"
+      Cache-Control: "no-cache"
+      Content-Type: "application/json"
+
+- name: papertrail
+  category: monitoring
+  key_prefixes: []
+  key_patterns: ["^[a-f0-9]{20,40}$"]
+  validation:
+    method: GET
+    url: "https://papertrailapp.com/api/v1/systems.json"
+    auth: "header:X-Papertrail-Token"
+  metadata_from_validation:
+    name_path: "0.name"
+
+- name: bugsnag
+  category: monitoring
+  key_prefixes: []
+  key_patterns: ["^[a-f0-9]{32,40}$"]
+  validation:
+    method: GET
+    url: "https://api.bugsnag.com/organizations"
+    auth: "header:Authorization"
+    headers:
+      Authorization: "token {{key}}"
+  metadata_from_validation:
+    name_path: "0.name"
+
+- name: phrase
+  category: localization
+  key_prefixes: []
+  key_patterns: ["^[a-f0-9]{40}$"]
+  validation:
+    method: GET
+    url: "https://api.phrase.com/v2/user"
+    auth: "header:Authorization"
+    headers:
+      Authorization: "token {{key}}"
+  metadata_from_validation:
+    name_path: "name"
+    email_path: "email"
+
+- name: telnyx
+  category: communication
+  key_prefixes: ["KEY"]
+  key_patterns: ["^KEY[a-zA-Z0-9_-]{20,40}$"]
+  validation:
+    method: GET
+    url: "https://api.telnyx.com/v2/messaging_profiles"
+    auth: "bearer"
+  metadata_from_validation:
+    name_path: "data.0.name"
+
+- name: transifex
+  category: localization
+  key_prefixes: []
+  key_patterns: ["^[a-f0-9]{32,40}$"]
+  validation:
+    method: GET
+    url: "https://api.transifex.com/resource"
+    auth: "bearer"
+
+- name: mailchimp_transactional
+  category: email
+  key_prefixes: []
+  key_patterns: ["^[a-zA-Z0-9_-]{20,30}$"]
+  validation:
+    method: POST
+    url: "https://mandrillapp.com/api/1.0/users/ping.json"
+    auth: "body"
+    headers:
+      Content-Type: "application/json"
+    body: '{"key":"{{key}}"}'
+  metadata:
+    - method: POST
+      url: "https://mandrillapp.com/api/1.0/users/info.json"
+      auth: "body"
+      headers:
+        Content-Type: "application/json"
+      body: '{"key":"{{key}}"}'
+      extract: "username"
+      store_as: "name"
+
+- name: recharge
+  category: ecommerce
+  key_prefixes: []
+  key_patterns: ["^[a-f0-9]{32,40}$", "^[a-zA-Z0-9_-]{30,50}$"]
+  validation:
+    method: GET
+    url: "https://api.rechargeapps.com/v1/charges"
+    auth: "header:X-Recharge-Access-Token"
+
+- name: clicksend
+  category: communication
+  key_prefixes: []
+  key_patterns: ["^[a-zA-Z0-9_-]{20,40}$"]
+  validation:
+    method: GET
+    url: "https://rest.clicksend.com/v3/account"
+    auth: "basic"
+
+- name: wistia
+  category: api
+  key_prefixes: []
+  key_patterns: ["^[a-f0-9]{32,40}$"]
+  validation:
+    method: GET
+    url: "https://api.wistia.com/v1/medias.json"
+    auth: "bearer"
+
+- name: mouseflow
+  category: analytics
+  key_prefixes: []
+  key_patterns: ["^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$", "^[a-zA-Z0-9_-]{20,40}$"]
+  validation:
+    method: GET
+    url: "https://api-us.mouseflow.com/websites"
+    auth: "bearer"
+
+- name: instatus
+  category: monitoring
+  key_prefixes: []
+  key_patterns: ["^[a-f0-9]{32,40}$", "^[a-zA-Z0-9_-]{20,40}$"]
+  validation:
+    method: GET
+    url: "https://api.instatus.com/v1/pages"
+    auth: "bearer"
+  metadata_from_validation:
+    name_path: "0.name"
+
+- name: talkjs
+  category: communication
+  key_prefixes: ["sk_live_", "sk_test_"]
+  key_patterns: ["^sk_(live|test)_[a-zA-Z0-9_-]{20,}$"]
+  validation:
+    method: GET
+    url: "https://api.talkjs.com/v1"
+    auth: "bearer"
+
+- name: api2pdf
+  category: api
+  key_prefixes: []
+  key_patterns: ["^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$", "^[a-zA-Z0-9_-]{20,40}$"]
+  validation:
+    method: GET
+    url: "https://v2018.api2pdf.com/merge"
+    auth: "bearer"
+
+- name: baseten
+  category: ai
+  key_prefixes: []
+  key_patterns: ["^[a-zA-Z0-9_-]{20,40}\\.[a-zA-Z0-9_-]{20,40}$"]
+  validation:
+    method: GET
+    url: "https://app.baseten.co/api/v1/models"
+    auth: "bearer"
+
+- name: runpod
+  category: ai
+  key_prefixes: []
+  key_patterns: ["^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$", "^[a-zA-Z0-9_-]{30,50}$"]
+  validation:
+    method: GET
+    url: "https://api.runpod.ai/v2/pods"
+    auth: "bearer"
+
+- name: renderform
+  category: api
+  key_prefixes: []
+  key_patterns: ["^[a-f0-9]{32,40}$", "^[a-zA-Z0-9_-]{20,40}$"]
+  validation:
+    method: GET
+    url: "https://getrenderform.com/api/v2/templates"
+    auth: "bearer"
+
+- name: ngrok
+  category: infrastructure
+  key_prefixes: ["ak_"]
+  key_patterns: ["^ak_[a-zA-Z0-9_-]{20,}$", "^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$"]
+  validation:
+    method: GET
+    url: "https://api.ngrok.com/api_keys"
+    auth: "bearer"
+    headers:
+      ngrok-version: "2"
+
+- name: tinify
+  category: api
+  key_prefixes: []
+  key_patterns: ["^[a-zA-Z0-9_-]{20,40}$"]
+  validation:
+    method: POST
+    url: "https://api.tinify.com/shrink"
+    auth: "basic"
+
+- name: giphy
+  category: api
+  key_prefixes: []
+  key_patterns: ["^[a-zA-Z0-9_-]{20,40}$"]
+  validation:
+    method: GET
+    url: "https://api.giphy.com/v1/gifs/trending?api_key={{key}}&limit=1"
+    auth: "none"
+  metadata_from_validation:
+    name_path: "meta.status"
+
+- name: unsplash
+  category: api
+  key_prefixes: []
+  key_patterns: ["^[a-zA-Z0-9_-]{30,50}$"]
+  validation:
+    method: GET
+    url: "https://api.unsplash.com/me"
+    auth: "header:Authorization"
+    headers:
+      Authorization: "Client-ID {{key}}"
+
+- name: tinybird
+  category: database
+  key_prefixes: []
+  key_patterns: ["^p_[a-zA-Z0-9_-]{20,}$", "^[a-zA-Z0-9_-]{30,50}$"]
+  validation:
+    method: GET
+    url: "https://api.tinybird.co/v1/tokens"
+    auth: "bearer"
+
+- name: zapier
+  category: developer
+  key_prefixes: []
+  key_patterns: ["^[a-f0-9]{32,40}$", "^[a-zA-Z0-9_-]{30,50}$"]
+  validation:
+    method: GET
+    url: "https://actions.zapier.com/api/v2/auth/check/"
+    auth: "bearer"
+
+- name: fullstory
+  category: analytics
+  key_prefixes: []
+  key_patterns: ["^[a-f0-9]{32,40}$"]
+  validation:
+    method: GET
+    url: "https://api.fullstory.com/auth/v1/me"
+    auth: "basic"
+
+- name: daily
+  category: communication
+  key_prefixes: []
+  key_patterns: ["^[a-f0-9]{32,40}$", "^[a-zA-Z0-9_-]{30,50}$"]
+  validation:
+    method: GET
+    url: "https://api.daily.co/v1/rooms"
+    auth: "bearer"
+
+- name: pexels
+  category: api
+  key_prefixes: []
+  key_patterns: ["^[a-zA-Z0-9_-]{30,50}$"]
+  validation:
+    method: GET
+    url: "https://api.pexels.com/v1/search?query=test&per_page=1"
+    auth: "bearer"
+
+- name: speechmatics
+  category: ai
+  key_prefixes: []
+  key_patterns: ["^[a-f0-9]{32,40}$", "^[a-zA-Z0-9_-]{30,50}$"]
+  validation:
+    method: GET
+    url: "https://asr.api.speechmatics.com/v2/jobs/"
+    auth: "bearer"
+
+- name: vimeo
+  category: api
+  key_prefixes: []
+  key_patterns: ["^[a-f0-9]{32,40}$", "^[a-zA-Z0-9_-]{30,50}$"]
+  validation:
+    method: GET
+    url: "https://api.vimeo.com/me"
+    auth: "bearer"
+  metadata_from_validation:
+    name_path: "name"
+    email_path: "email"
+
+- name: split
+  category: feature_flags
+  key_prefixes: []
+  key_patterns: ["^[a-f0-9]{32,40}$", "^[a-zA-Z0-9_-]{30,50}$"]
+  validation:
+    method: GET
+    url: "https://api.split.io/internal/api/v2/workspaces"
+    auth: "bearer"
+
+- name: pandadoc
+  category: api
+  key_prefixes: []
+  key_patterns: ["^[a-f0-9]{32,40}$", "^[a-zA-Z0-9_-]{30,50}$"]
+  validation:
+    method: GET
+    url: "https://api.pandadoc.com/public/v1/documents"
+    auth: "header:Authorization"
+    headers:
+      Authorization: "API-Key {{key}}"
+
+- name: pingdom
+  category: monitoring
+  key_prefixes: []
+  key_patterns: ["^[a-f0-9]{32,40}$", "^[a-zA-Z0-9_-]{30,50}$"]
+  validation:
+    method: GET
+    url: "https://api.pingdom.com/api/3.1/checks"
+    auth: "bearer"
+
+- name: pdfshift
+  category: api
+  key_prefixes: ["sk_"]
+  key_patterns: ["^sk_[a-zA-Z0-9_-]{20,}$"]
+  validation:
+    method: POST
+    url: "https://api.pdfshift.io/v3/convert/pdf"
+    auth: "header:X-API-Key"
+    headers:
+      Content-Type: "application/json"
+    body: '{"source":"https://example.com"}'
+
+- name: revai
+  category: ai
+  key_prefixes: ["rev_"]
+  key_patterns: ["^rev_[a-zA-Z0-9_-]{20,}$"]
+  validation:
+    method: GET
+    url: "https://api.rev.ai/speechtotext/v1/jobs"
+    auth: "bearer"
+
+- name: mux
+  category: api
+  key_patterns: ["^[a-zA-Z0-9_-]{8,20}:[a-zA-Z0-9_-]{20,50}$"]
+  validation:
+    method: GET
+    url: "https://api.mux.com/video/v1/assets"
+    auth: "basic_composite"
+
+- name: confluent
+  category: api
+  key_patterns: ["^[a-zA-Z0-9]{16,24}:[a-zA-Z0-9]{20,50}$"]
+  validation:
+    method: GET
+    url: "https://api.confluent.cloud/kafka/v3/clusters"
+    auth: "basic_composite"
+
+- name: trello
+  category: productivity
+  key_patterns: ["^[a-f0-9]{32}:[a-f0-9]{40,64}$"]
+  validation:
+    method: GET
+    url: "https://api.trello.com/1/members/me?key={{key.client_id}}&token={{key.secret}}"
+    auth: "none"
+
+- name: godaddy
+  category: api
+  key_patterns: ["^[a-zA-Z0-9_-]{10,20}:[a-zA-Z0-9_-]{20,40}$"]
+  validation:
+    method: GET
+    url: "https://api.godaddy.com/v1/domains"
+    auth: "header:Authorization"
+    headers:
+      Authorization: "sso-key {{key.client_id}}:{{key.secret}}"
+
+- name: porkbun
+  category: api
+  key_patterns: ["^[a-zA-Z0-9]{20,30}:[a-zA-Z0-9]{20,30}$"]
+  validation:
+    method: POST
+    url: "https://api.porkbun.com/api/json/v3/ping"
+    auth: "none"
+    headers:
+      Content-Type: "application/json"
+    body: '{"apikey":"{{key.client_id}}","secretapikey":"{{key.secret}}"}'

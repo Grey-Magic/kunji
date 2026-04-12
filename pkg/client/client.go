@@ -92,7 +92,7 @@ func (pr *ProxyRotator) GetProxy(req *http.Request) (*url.URL, error) {
 func (pr *ProxyRotator) ReportFailure(pxy *url.URL) {
 	pr.mux.Lock()
 	defer pr.mux.Unlock()
-	
+
 	newProxies := []*url.URL{}
 	found := false
 	for _, p := range pr.proxies {
@@ -102,7 +102,7 @@ func (pr *ProxyRotator) ReportFailure(pxy *url.URL) {
 		}
 		newProxies = append(newProxies, p)
 	}
-	
+
 	if found {
 		pr.proxies = newProxies
 		if len(pr.proxies) > 0 {
@@ -119,14 +119,14 @@ func (pr *ProxyRotator) FilterDeadProxies(timeoutSecs int) int {
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	validProxies := []*url.URL{}
-	
+
 	testURL := "https://api.ipify.org?format=json"
-	
+
 	for _, p := range pr.proxies {
 		wg.Add(1)
 		go func(pxy *url.URL) {
 			defer wg.Done()
-			
+
 			transport := &http.Transport{
 				Proxy: http.ProxyURL(pxy),
 				DialContext: (&net.Dialer{
@@ -137,10 +137,10 @@ func (pr *ProxyRotator) FilterDeadProxies(timeoutSecs int) int {
 				Transport: transport,
 				Timeout:   time.Duration(timeoutSecs) * time.Second,
 			}
-			
+
 			req, _ := http.NewRequest("GET", testURL, nil)
 			req.Header.Set("User-Agent", GetRandomUserAgent())
-			
+
 			resp, err := client.Do(req)
 			if err == nil {
 				defer resp.Body.Close()
@@ -152,15 +152,15 @@ func (pr *ProxyRotator) FilterDeadProxies(timeoutSecs int) int {
 			}
 		}(p)
 	}
-	
+
 	wg.Wait()
-	
+
 	deadCount := len(pr.proxies) - len(validProxies)
 	pr.mux.Lock()
 	pr.proxies = validProxies
 	pr.index = 0
 	pr.mux.Unlock()
-	
+
 	return deadCount
 }
 
@@ -169,6 +169,10 @@ type providerState struct {
 	consecutive429 int
 	currentR       rate.Limit
 	lastSuccess    time.Time
+	last429        time.Time
+	totalRequests  int64
+	total429s      int64
+	backoffUntil   time.Time
 }
 
 type RateLimiterManager struct {
@@ -204,6 +208,17 @@ func (rm *RateLimiterManager) Wait(ctx context.Context, provider string) error {
 		rm.mux.Unlock()
 	}
 
+	if !state.backoffUntil.IsZero() {
+		waitDur := time.Until(state.backoffUntil)
+		if waitDur > 0 {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(waitDur):
+			}
+		}
+	}
+
 	return state.limiter.Wait(ctx)
 }
 
@@ -216,27 +231,53 @@ func (rm *RateLimiterManager) ReportResult(provider string, statusCode int) {
 		return
 	}
 
+	state.totalRequests++
+
 	if statusCode == 429 {
 		state.consecutive429++
-		newR := state.currentR / 2
-		if newR < 0.1 {
-			newR = 0.1
+		state.total429s++
+		state.last429 = time.Now()
+
+		state.currentR = state.currentR / 2
+		if state.currentR < 0.1 {
+			state.currentR = 0.1
 		}
-		state.currentR = newR
 		state.limiter.SetLimit(state.currentR)
-		pterm.Debug.Printfln("Throttling %s due to 429. New limit: %.2f req/s", provider, float64(state.currentR))
+
+		switch {
+		case state.consecutive429 >= 4:
+			state.backoffUntil = time.Now().Add(30 * time.Second)
+		case state.consecutive429 >= 2:
+			state.backoffUntil = time.Now().Add(10 * time.Second)
+		default:
+			state.backoffUntil = time.Now().Add(3 * time.Second)
+		}
+
+		pterm.Debug.Printfln("Throttling %s: %d consecutive 429s, limit=%.2f req/s, backoff=%.0fs",
+			provider, state.consecutive429, float64(state.currentR), time.Until(state.backoffUntil).Seconds())
 	} else if statusCode >= 200 && statusCode < 300 {
 		state.consecutive429 = 0
 		state.lastSuccess = time.Now()
-		
+		state.backoffUntil = time.Time{}
+
 		if state.currentR < rm.defaultR {
-			newR := state.currentR * 1.2
-			if newR > rm.defaultR {
-				newR = rm.defaultR
+			state.currentR = state.currentR * 1.5
+			if state.currentR > rm.defaultR {
+				state.currentR = rm.defaultR
 			}
-			state.currentR = newR
 			state.limiter.SetLimit(state.currentR)
-			pterm.Debug.Printfln("Scaling up %s after success. New limit: %.2f req/s", provider, float64(state.currentR))
+			pterm.Debug.Printfln("Recovering %s: limit=%.2f req/s", provider, float64(state.currentR))
+		}
+	} else if statusCode >= 500 {
+		state.consecutive429 = 0
+		state.backoffUntil = time.Time{}
+
+		if state.currentR < rm.defaultR {
+			state.currentR = state.currentR * 1.1
+			if state.currentR > rm.defaultR {
+				state.currentR = rm.defaultR
+			}
+			state.limiter.SetLimit(state.currentR)
 		}
 	}
 }
@@ -248,6 +289,33 @@ func (rm *RateLimiterManager) SetLimit(provider string, r rate.Limit, b int) {
 		limiter:  rate.NewLimiter(r, b),
 		currentR: r,
 	}
+}
+
+func (rm *RateLimiterManager) Stats() map[string]struct {
+	Requests int64
+	Rate429s int64
+	Limit    float64
+} {
+	rm.mux.RLock()
+	defer rm.mux.RUnlock()
+
+	stats := make(map[string]struct {
+		Requests int64
+		Rate429s int64
+		Limit    float64
+	}, len(rm.states))
+	for name, s := range rm.states {
+		stats[name] = struct {
+			Requests int64
+			Rate429s int64
+			Limit    float64
+		}{
+			Requests: s.totalRequests,
+			Rate429s: s.total429s,
+			Limit:    float64(s.currentR),
+		}
+	}
+	return stats
 }
 
 var (
@@ -285,38 +353,35 @@ func NewHTTPClient(proxyStr string, timeoutSecs int) (*http.Client, *ProxyRotato
 
 	dialer := &net.Dialer{
 		Timeout:   dialTimeout,
-		KeepAlive: 60 * time.Second,
+		KeepAlive: 30 * time.Second,
 	}
 
-	transport := &http.Transport{
-		Proxy: rotator.GetProxy,
-		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-			host, port, _ := net.SplitHostPort(addr)
-			dnsCacheMux.RLock()
-			ips, found := dnsCache[host]
-			dnsCacheMux.RUnlock()
+	poolMgr := NewConnectionPoolManager(HostPoolConfig{
+		MaxConnsPerHost:     100,
+		MaxIdleConnsPerHost: 20,
+		IdleTimeout:         120 * time.Second,
+	})
 
-			if found && len(ips) > 0 {
+	transport := poolMgr.BuildTransport(dialer, rotator.GetProxy)
 
-				for _, ip := range ips {
-					conn, err := dialer.DialContext(ctx, network, net.JoinHostPort(ip.String(), port))
-					if err == nil {
-						return conn, nil
-					}
+	transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+		host, port, _ := net.SplitHostPort(addr)
+		dnsCacheMux.RLock()
+		ips, found := dnsCache[host]
+		dnsCacheMux.RUnlock()
+
+		if found && len(ips) > 0 {
+			for _, ip := range ips {
+				conn, err := dialer.DialContext(ctx, network, net.JoinHostPort(ip.String(), port))
+				if err == nil {
+					return conn, nil
 				}
 			}
-			return dialer.DialContext(ctx, network, addr)
-		},
-		ForceAttemptHTTP2:     true,
-		MaxIdleConns:          10000,
-		MaxIdleConnsPerHost:   500,
-		MaxConnsPerHost:       500,
-		IdleConnTimeout:       180 * time.Second,
-		TLSHandshakeTimeout:   10 * time.Second,
-		ExpectContinueTimeout: 1 * time.Second,
-		ResponseHeaderTimeout: dialTimeout,
-		DisableKeepAlives:     false,
+		}
+		return dialer.DialContext(ctx, network, addr)
 	}
+
+	transport.ResponseHeaderTimeout = dialTimeout
 
 	client := &http.Client{
 		Transport: transport,
