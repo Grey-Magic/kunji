@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"os"
 	"sort"
@@ -34,8 +35,9 @@ var (
 	bench           bool
 	password        string
 	deepScan        bool
-	)
-
+	quiet           bool
+	format          string
+)
 
 var validateCmd = &cobra.Command{
 	Use:   "validate",
@@ -43,7 +45,9 @@ var validateCmd = &cobra.Command{
 	Long:  `A lightning-fast engine for validating API keys individually or in bulk, with built-in proxy rotation and metadata extraction.`,
 	Args:  cobra.NoArgs,
 	Run: func(cmd *cobra.Command, args []string) {
-		PrintBanner()
+		if !quiet && format != "json" {
+			PrintBanner()
+		}
 
 		if customProviders != "" {
 			validators.CustomProvidersDir = customProviders
@@ -70,7 +74,9 @@ var validateCmd = &cobra.Command{
 		}
 
 		if singleKey == "" && keysFile == "" && hasStdin {
-			pterm.Info.Println("Reading keys from stdin...")
+			if !quiet && format != "json" {
+				pterm.Info.Println("Reading keys from stdin...")
+			}
 		}
 
 		if threads < 1 || threads > 100 {
@@ -96,8 +102,12 @@ var validateCmd = &cobra.Command{
 		runr.DeepScan = deepScan
 		runr.Password = password
 		runr.Bench = bench
+		runr.Quiet = quiet
+		runr.Format = format
 
-		runr.PreflightProxyCheck()
+		if !quiet {
+			runr.PreflightProxyCheck()
+		}
 
 		stream, count, err := runr.GetKeyStream(singleKey, keysFile)
 		if err != nil {
@@ -116,10 +126,22 @@ var validateCmd = &cobra.Command{
 			scanner := bufio.NewScanner(stream)
 			for scanner.Scan() {
 				k := strings.TrimSpace(scanner.Text())
-				if k == "" { continue }
+				if k == "" {
+					continue
+				}
 				detection := runr.Detector.DetectProviderWithSuggestion(k, category)
 				if detection.Provider != "unknown" {
-					pterm.Success.Printfln("Key: %s... -> Provider: %s", k[:min(len(k), 8)], detection.Provider)
+					pName := detection.Provider
+					val, exists := runr.Factory.GetValidator(pName)
+					endpoint := "multiple potential"
+					if exists {
+
+						dummyRes, _ := val.Validate(context.TODO(), k)
+						if dummyRes != nil {
+							endpoint = dummyRes.Endpoint
+						}
+					}
+					pterm.Success.Printfln("Key: %s... -> Provider: %s (%s)", k[:min(len(k), 8)], pName, endpoint)
 				} else {
 					pterm.Warning.Printfln("Key: %s... -> Unknown (Suggestions: %v)", k[:min(len(k), 8)], detection.Suggestions)
 				}
@@ -219,6 +241,8 @@ func init() {
 	validateCmd.Flags().BoolVar(&deepScan, "deep-scan", false, "Try multiple providers if detection is ambiguous or fails")
 	validateCmd.Flags().StringVar(&password, "password", "", "Password to encrypt output files or decrypt resume files")
 	validateCmd.Flags().BoolVar(&bench, "bench", false, "Run 3 consecutive tests per key to measure average latency")
+	validateCmd.Flags().BoolVar(&quiet, "quiet", false, "Suppress banner, progress bar, and summary table")
+	validateCmd.Flags().StringVar(&format, "format", "text", "Output format: text or json")
 
 	validateCmd.RegisterFlagCompletionFunc("provider", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 		providers, err := validators.GetAllProviders()

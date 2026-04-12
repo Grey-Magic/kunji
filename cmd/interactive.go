@@ -79,22 +79,21 @@ var interactiveCmd = &cobra.Command{
 		runr.Password = password
 		runr.PreflightProxyCheck()
 		runr.Run(strings.NewReader(strings.Join(finalKeys, "\n")), len(finalKeys))
-		},
-		}
+	},
+}
 
-		func init() {
-		rootCmd.AddCommand(interactiveCmd)
+func init() {
+	rootCmd.AddCommand(interactiveCmd)
 
-		interactiveCmd.Flags().StringVarP(&outputFile, "out", "o", "", "Output file for valid keys/results")
-		interactiveCmd.Flags().StringVarP(&provider, "provider", "p", "", "Force a specific provider")
-		interactiveCmd.Flags().StringVarP(&category, "category", "c", "", "Limit regex auto-detection to a specific category")
-		interactiveCmd.Flags().IntVarP(&threads, "threads", "t", 10, "Number of concurrent validation workers")
-		interactiveCmd.Flags().StringVar(&proxy, "proxy", "", "Proxy string")
-		interactiveCmd.Flags().BoolVar(&onlyValid, "only-valid", false, "Only output valid keys to file/console")
-		interactiveCmd.Flags().BoolVar(&skipMetadata, "skip-metadata", false, "Skip fetching account metadata for speed")
-		interactiveCmd.Flags().BoolVar(&canaryCheck, "no-canary-check", true, "Disable automated canary/honeypot token detection")
-		interactiveCmd.Flags().Float64Var(&minBalance, "min-balance", 0.0, "Minimum balance required")
+	interactiveCmd.Flags().StringVarP(&outputFile, "out", "o", "", "Output file for valid keys/results")
+	interactiveCmd.Flags().StringVarP(&provider, "provider", "p", "", "Force a specific provider")
+	interactiveCmd.Flags().StringVarP(&category, "category", "c", "", "Limit regex auto-detection to a specific category")
+	interactiveCmd.Flags().IntVarP(&threads, "threads", "t", 10, "Number of concurrent validation workers")
+	interactiveCmd.Flags().StringVar(&proxy, "proxy", "", "Proxy string")
+	interactiveCmd.Flags().BoolVar(&onlyValid, "only-valid", false, "Only output valid keys to file/console")
+	interactiveCmd.Flags().BoolVar(&skipMetadata, "skip-metadata", false, "Skip fetching account metadata for speed")
+	interactiveCmd.Flags().BoolVar(&canaryCheck, "no-canary-check", true, "Disable automated canary/honeypot token detection")
+	interactiveCmd.Flags().Float64Var(&minBalance, "min-balance", 0.0, "Minimum balance required")
 
-		interactiveCmd.Flags().StringVar(&password, "password", "", "Password to encrypt output files")
-		}
-
+	interactiveCmd.Flags().StringVar(&password, "password", "", "Password to encrypt output files")
+}
