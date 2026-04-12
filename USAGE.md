@@ -1,6 +1,6 @@
 # Kunji - Complete Usage Guide
 
-Kunji is a CLI tool that validates API keys across 260+ services. This guide covers everything you need to know.
+Kunji is a CLI tool that validates API keys across 351+ services. This guide covers everything you need to know.
 
 ---
 
@@ -54,6 +54,12 @@ Kunji is a CLI tool that validates API keys across 260+ services. This guide cov
 
 # Only save valid keys with a minimum balance
 ./kunji validate -f keys.txt -o funded.txt --only-valid --min-balance 5.0
+
+# Encrypted output
+./kunji validate -f keys.txt -o results.json --password "my-secret"
+
+# JSON streaming to stdout
+./kunji validate -f keys.txt --format json --quiet
 ```
 
 ### Dry Run (Detection Mode)
@@ -70,6 +76,30 @@ If you have your own YAML provider definitions:
 
 ```bash
 ./kunji validate -f keys.txt --custom-providers ./my-definitions/
+```
+
+### Deep Scan
+
+When key detection is ambiguous, probe across all potential providers:
+
+```bash
+./kunji validate -f keys.txt --deep-scan
+```
+
+### Benchmark Mode
+
+Measure average latency per key with 3 consecutive tests:
+
+```bash
+./kunji validate -k "sk-proj-..." --bench
+```
+
+### Skip Metadata
+
+Skip account metadata extraction (balance, email) for faster validation:
+
+```bash
+./kunji validate -f keys.txt --skip-metadata
 ```
 
 ### Output Formats
@@ -114,8 +144,11 @@ Kunji auto-detects providers using:
 ./kunji validate -k "github_pat_..."   # GitHub
 ./kunji validate -k "sk_live_..."      # Stripe
 ./kunji validate -k "sk_test_..."      # Stripe (test)
+./kunji validate -k "rk_live_..."      # Stripe (restricted)
 ./kunji validate -k "vercel_..."       # Vercel
 ./kunji validate -k "dop_v1_..."        # DigitalOcean
+./kunji validate -k "PMAK-..."          # Postman
+./kunji validate -k "rdme_..."          # ReadMe
 ```
 
 ### Composite Keys (ID:Secret)
@@ -136,6 +169,12 @@ Some providers require two values (client_id and secret). Use colon `:` separato
 
 # Zendesk (Subdomain:Token)
 ./kunji validate -k "subdomain:token"
+
+# Mux (AccessKey:SecretKey)
+./kunji validate -k "access_key:secret_key"
+
+# Confluent (APIKey:APISecret)
+./kunji validate -k "api_key:api_secret"
 ```
 
 **From file (keys.txt):**
@@ -152,8 +191,8 @@ subdomain:api_key
 ```
 
 The code automatically splits by `:` and interpolates:
-- `{{key.client_id}}` → first part
-- `{{key.secret}}` → second part
+- `{{key.client_id}}` -> first part
+- `{{key.secret}}` -> second part
 
 ### Force Specific Provider
 
@@ -174,24 +213,23 @@ Skip auto-detection and force a provider:
 
 ```bash
 # Google Services (all use AIza... key format)
-./kunji validate -k "AIza..." -p google_maps          # Maps
-./kunji validate -k "AIza..." -p google_geocoding    # Geocoding
-./kunji validate -k "AIza..." -p google_elevation    # Elevation
-./kunji validate -k "AIza..." -p google_distance_matrix  # Distance Matrix
-./kunji validate -k "AIza..." -p google_places       # Places
-./kunji validate -k "AIza..." -p google_timezone      # Timezone
-./kunji validate -k "AIza..." -p google_directions   # Directions
-./kunji validate -k "AIza..." -p google_translate     # Translate
-./kunji validate -k "AIza..." -p google_firebase      # Firebase
-./kunji validate -k "AIza..." -p google_sheets        # Sheets
-./kunji validate -k "AIza..." -p google_custom_search # Custom Search
-./kunji validate -k "AIza..." -p google_pagespeed     # PageSpeed
-./kunji validate -k "AIza..." -p google_geolocate      # Geolocation
-
-# Test YouTube API key
+./kunji validate -k "AIza..." -p google_maps
+./kunji validate -k "AIza..." -p google_geocoding
+./kunji validate -k "AIza..." -p google_elevation
+./kunji validate -k "AIza..." -p google_distance_matrix
+./kunji validate -k "AIza..." -p google_places
+./kunji validate -k "AIza..." -p google_timezone
+./kunji validate -k "AIza..." -p google_directions
+./kunji validate -k "AIza..." -p google_translate
+./kunji validate -k "AIza..." -p google_firebase
+./kunji validate -k "AIza..." -p google_sheets
+./kunji validate -k "AIza..." -p google_custom_search
+./kunji validate -k "AIza..." -p google_pagespeed
+./kunji validate -k "AIza..." -p google_geolocate
+./kunji validate -k "AIza..." -p google_books
+./kunji validate -k "AIza..." -p google_safe_browsing
+./kunji validate -k "AIza..." -p google_recaptcha_enterprise
 ./kunji validate -k "AIza..." -p youtube
-
-# Test Gemini/AI API key
 ./kunji validate -k "AIza..." -p gemini
 ```
 
@@ -203,10 +241,13 @@ Limit detection to specific categories:
 # Only LLM providers
 ./kunji validate -f keys.txt -c llm
 
-# Only common services
-./kunji validate -f keys.txt -c common
+# Only payment providers
+./kunji validate -f keys.txt -c payments
 
-# Available categories: llm, common
+# Only communication services
+./kunji validate -f keys.txt -c communication
+
+# Available categories: llm, payments, communication, cloud, database, monitoring, security, api, developer, devops, productivity, ecommerce, crm, analytics, email, container, storage, dns, cdn, ai, feature_flags, cms, search, blockchain, testing, deployment, iac, cicd, secrets, web3, ai_ml, collaboration, documentation, api_gateway, auth, auth, localization, marketing, support, social, imaging
 ```
 
 ---
@@ -348,7 +389,7 @@ Limit detection to specific categories:
 
 ---
 
-## Cloud & Infrastructure (New)
+## Cloud & Infrastructure
 
 ### Vercel
 ```bash
@@ -369,6 +410,16 @@ Limit detection to specific categories:
 ### Fly.io
 ```bash
 ./kunji validate -k "fly_..."
+```
+
+### Render
+```bash
+./kunji validate -k "rnd_..."
+```
+
+### Northflank
+```bash
+./kunji validate -k "nf-..."
 ```
 
 ### Upstash (Redis/Kafka)
@@ -394,6 +445,7 @@ Limit detection to specific categories:
 ### DigitalOcean
 ```bash
 ./kunji validate -k "dop_v1_..."
+./kunji validate -k "do_pat_..."
 ```
 
 ### Cloudflare
@@ -401,9 +453,14 @@ Limit detection to specific categories:
 ./kunji validate -k "cloudflare_..."
 ```
 
+### ngrok
+```bash
+./kunji validate -k "ak_..."
+```
+
 ---
 
-## AI/ML Services (New)
+## AI/ML Services
 
 ### Pinecone (Vector DB)
 ```bash
@@ -418,12 +475,12 @@ Limit detection to specific categories:
 
 ### LangSmith
 ```bash
-./kunji validate -k "ls-..."
+./kunji validate -k "lsv2_..."
 ```
 
 ### Langfuse
 ```bash
-./kunji validate -k "lf-..."
+./kunji validate -k "pk-lf-..."
 ```
 
 ### Weights & Biases
@@ -431,9 +488,44 @@ Limit detection to specific categories:
 ./kunji validate -k "wandb_..."
 ```
 
+### AssemblyAI (Speech-to-Text)
+```bash
+./kunji validate -k "..."
+```
+
+### Deepgram (Speech-to-Text)
+```bash
+./kunji validate -k "..."
+```
+
+### Stability AI (Image Generation)
+```bash
+./kunji validate -k "sk-..."
+```
+
+### Rev.ai (Transcription)
+```bash
+./kunji validate -k "rev_..."
+```
+
+### Speechmatics (Speech-to-Text)
+```bash
+./kunji validate -k "..."
+```
+
+### RunPod (GPU Cloud)
+```bash
+./kunji validate -k "..."
+```
+
+### Baseten (ML Deployment)
+```bash
+./kunji validate -k "..."
+```
+
 ---
 
-## Security & Auth (New)
+## Security & Auth
 
 ### Auth0
 ```bash
@@ -450,9 +542,39 @@ Limit detection to specific categories:
 ./kunji validate -k "dp-..."
 ```
 
+### AbuseIPDB
+```bash
+./kunji validate -k "..."
+```
+
+### GreyNoise
+```bash
+./kunji validate -k "gn_..."
+```
+
+### SecurityTrails
+```bash
+./kunji validate -k "st_..."
+```
+
+### IPQualityScore
+```bash
+./kunji validate -k "..."
+```
+
+### SonarQube
+```bash
+./kunji validate -k "squ_..."
+```
+
+### Semgrep
+```bash
+./kunji validate -k "semgrep_..."
+```
+
 ---
 
-## Communication (New)
+## Communication
 
 ### Discord Bot
 ```bash
@@ -484,14 +606,80 @@ Limit detection to specific categories:
 ./kunji validate -k "stream-..."
 ```
 
+### Ably (Real-time Messaging)
+```bash
+./kunji validate -k "..."
+```
+
+### MessageBird
+```bash
+./kunji validate -k "live_..."
+./kunji validate -k "test_..."
+```
+
+### OneSignal
+```bash
+./kunji validate -k "os_..."
+```
+
+### Svix (Webhooks)
+```bash
+./kunji validate -k "sk_live_..."
+./kunji validate -k "sk_test_..."
+```
+
+### Telnyx
+```bash
+./kunji validate -k "KEY..."
+```
+
+### Daily.co (Video)
+```bash
+./kunji validate -k "..."
+```
+
+### ClickSend
+```bash
+./kunji validate -k "..."
+```
+
+### TalkJS (Chat SDK)
+```bash
+./kunji validate -k "sk_live_..."
+./kunji validate -k "sk_test_..."
+```
+
+### Airship (Push)
+```bash
+./kunji validate -k "..."
+```
+
+### Knock
+```bash
+./kunji validate -k "knock_..."
+```
+
 ---
 
-## Payments (Updated)
+## Payments
 
 ### Stripe
 ```bash
 ./kunji validate -k "sk_live_..."   # Live
-./kunji validate -k "sk_test_..."   # Test (NEW)
+./kunji validate -k "sk_test_..."   # Test
+./kunji validate -k "rk_live_..."   # Restricted (live)
+./kunji validate -k "rk_test_..."   # Restricted (test)
+```
+
+### Adyen
+```bash
+./kunji validate -k "..."
+```
+
+### Checkout.com
+```bash
+./kunji validate -k "sk_test_..."
+./kunji validate -k "sk_live_..."
 ```
 
 ### PayPal
@@ -524,9 +712,64 @@ Limit detection to specific categories:
 ./kunji validate -k "chargebee_..."
 ```
 
+### Recharge (Subscriptions)
+```bash
+./kunji validate -k "..."
+```
+
 ---
 
-## DevOps (New)
+## Email
+
+### Brevo (Sendinblue)
+```bash
+./kunji validate -k "xkeysib-..."
+```
+
+### Mailtrap
+```bash
+./kunji validate -k "mt_..."
+```
+
+### Mailersend
+```bash
+./kunji validate -k "mlsn_..."
+```
+
+### Mailjet
+```bash
+./kunji validate -k "..."  # Composite: apikey:secretkey
+```
+
+### SparkPost
+```bash
+./kunji validate -k "sp_..."
+```
+
+### ConvertKit
+```bash
+./kunji validate -k "ck_..."
+```
+
+### Customer.io
+```bash
+./kunji validate -k "..."  # Composite: siteid:apikey
+```
+
+### Plunk
+```bash
+./kunji validate -k "plln_sk_..."
+./kunji validate -k "sk_plnk_..."
+```
+
+### Mailchimp Transactional (Mandrill)
+```bash
+./kunji validate -k "..."
+```
+
+---
+
+## DevOps
 
 ### GitLab CI
 ```bash
@@ -550,7 +793,7 @@ Limit detection to specific categories:
 
 ---
 
-## Monitoring (Updated)
+## Monitoring
 
 ### Sentry
 ```bash
@@ -583,9 +826,40 @@ Limit detection to specific categories:
 ./kunji validate -k "DD_APP_..."
 ```
 
+### Rollbar
+```bash
+./kunji validate -k "pk_..."
+./kunji validate -k "ps_..."
+```
+
+### Bugsnag
+```bash
+./kunji validate -k "..."
+```
+
+### Papertrail
+```bash
+./kunji validate -k "..."
+```
+
+### FullStory
+```bash
+./kunji validate -k "..."
+```
+
+### Pingdom
+```bash
+./kunji validate -k "..."
+```
+
+### Instatus
+```bash
+./kunji validate -k "..."
+```
+
 ---
 
-## Database (New)
+## Database
 
 ### MongoDB Atlas
 ```bash
@@ -612,9 +886,34 @@ Limit detection to specific categories:
 ./kunji validate -k "r2_..."
 ```
 
+### Tinybird
+```bash
+./kunji validate -k "p_..."
+```
+
+### CockroachDB
+```bash
+./kunji validate -k "crdb_..."
+```
+
+### TiDB
+```bash
+./kunji validate -k "tidb_..."
+```
+
+### Yugabyte
+```bash
+./kunji validate -k "yb-..."
+```
+
+### TimescaleDB
+```bash
+./kunji validate -k "tsdb-..."
+```
+
 ---
 
-## Productivity (New)
+## CRM & Productivity
 
 ### Linear
 ```bash
@@ -628,8 +927,8 @@ Limit detection to specific categories:
 
 ### Airtable
 ```bash
-./kunji validate -k "key..."  # Personal token
-./kunji validate -k "pat..."  # Access token
+./kunji validate -k "key..."
+./kunji validate -k "pat..."
 ```
 
 ### ClickUp
@@ -642,115 +941,107 @@ Limit detection to specific categories:
 ./kunji validate -k "figma_..."
 ```
 
----
-
-## E-commerce & CMS (New)
-
-### Shopify
+### Pipedrive
 ```bash
-./kunji validate -k "shpat_..."
-./kunji validate -k "shpss_..."
+./kunji validate -k "..."
 ```
 
-### Strapi
+### Close.io
 ```bash
-./kunji validate -k "strapi_..."
+./kunji validate -k "close_..."
 ```
 
-### Sanity
+### Todoist
 ```bash
-./kunji validate -k "sk..."  # Project-specific
+./kunji validate -k "td_..."
 ```
 
-### Webflow
+### Cal.com
 ```bash
-./kunji validate -k "wf_..."
+./kunji validate -k "cal_..."
+./kunji validate -k "cal_live_..."
 ```
 
----
-
-## Blockchain (New)
-
-### Alchemy
+### Trello
 ```bash
-./kunji validate -k "alchemy_..."
-```
-
-### Infura
-```bash
-./kunji validate -k "infura_..."
-```
-
-### QuickNode
-```bash
-./kunji validate -k "qn-..."
-```
-
-### CoinGecko
-```bash
-./kunji validate -k "CG-..."
-```
-
-### Etherscan
-```bash
-./kunji validate -k "etherscan_..."
+./kunji validate -k "..."  # Composite: apikey:token
 ```
 
 ---
 
-## Testing (New)
+## Analytics
 
-### LambdaTest
+### Fathom
 ```bash
-./kunji validate -k "lambdatest_..."
+./kunji validate -k "fth_..."
 ```
 
-### Percy
+### Plausible
 ```bash
-./kunji validate -k "percy_..."
+./kunji validate -k "pls_..."
 ```
 
-### TestRail
+### Mouseflow
 ```bash
-./kunji validate -k "testrail_..."
+./kunji validate -k "..."
 ```
 
----
-
-## Deployment (New)
-
-### Koyeb
+### Mixpanel
 ```bash
-./kunji validate -k "koyeb_..."
+./kunji validate -k "..."
 ```
 
-### Coolify
+### Amplitude
 ```bash
-./kunji validate -k "coolify_..."
+./kunji validate -k "..."  # Composite: client:secret
 ```
 
----
-
-## Search (New)
-
-### Algolia
+### Pendo
 ```bash
-./kunji validate -k "..."  # Composite: appid:key
-```
-
-### Meilisearch
-```bash
-./kunji validate -k "meilisearch_..."
-```
-
-### Typesense
-```bash
-./kunji validate -k "typesense_..."
+./kunji validate -k "..."
 ```
 
 ---
 
-## Developer Tools (Existing)
+## Container & Storage
+
+### Docker Hub
+```bash
+./kunji validate -k "dckr_pat_..."
+```
+
+### Quay.io
+```bash
+./kunji validate -k "..."
+```
+
+### Backblaze B2
+```bash
+./kunji validate -k "..."  # Composite: keyid:key
+```
+
+---
+
+## DNS & CDN
+
+### NS1
+```bash
+./kunji validate -k "..."
+```
+
+### Fastly
+```bash
+./kunji validate -k "..."
+```
+
+### Bunny.net
+```bash
+./kunji validate -k "bny_..."
+```
+
+---
+
+## Developer Tools
 
 ### GitHub
 ```bash
@@ -775,6 +1066,26 @@ Limit detection to specific categories:
 ### Supabase
 ```bash
 ./kunji validate -k "sbp_..."
+```
+
+### Postman
+```bash
+./kunji validate -k "PMAK-..."
+```
+
+### ReadMe
+```bash
+./kunji validate -k "rdme_..."
+```
+
+### Hookdeck (Webhooks)
+```bash
+./kunji validate -k "hkdk_..."
+```
+
+### Zapier
+```bash
+./kunji validate -k "..."
 ```
 
 ---
@@ -806,21 +1117,303 @@ Limit detection to specific categories:
 
 ---
 
-## Analytics (Existing)
+## API & Data
 
-### Mixpanel
+### Hunter.io (Email Intelligence)
+```bash
+./kunji validate -k "hunter_..."
+```
+
+### Radar (Geofencing)
+```bash
+./kunji validate -k "prj_live_sk_..."
+./kunji validate -k "prj_test_sk_..."
+```
+
+### Formspree
+```bash
+./kunji validate -k "fsr_..."
+```
+
+### ScrapingBee
+```bash
+./kunji validate -k "sb_..."
+```
+
+### ScreenshotOne
+```bash
+./kunji validate -k "so_..."
+```
+
+### WeatherAPI
+```bash
+./kunji validate -k "wa_..."
+```
+
+### HERE Maps
+```bash
+./kunji validate -k "here_..."
+```
+
+### IPinfo
 ```bash
 ./kunji validate -k "..."
 ```
 
-### Amplitude
-```bash
-./kunji validate -k "..."  # Composite: client:secret
-```
-
-### Pendo
+### Clearbit
 ```bash
 ./kunji validate -k "..."
+```
+
+### Apollo.io (B2B Data)
+```bash
+./kunji validate -k "..."
+```
+
+### Jotform
+```bash
+./kunji validate -k "..."
+```
+
+### Typeform
+```bash
+./kunji validate -k "tfp_..."
+./kunji validate -k "tfa_..."
+```
+
+### Duffel (Travel)
+```bash
+./kunji validate -k "duffel_test_..."
+./kunji validate -k "duffel_live_..."
+```
+
+### Giphy
+```bash
+./kunji validate -k "..."
+```
+
+### Unsplash
+```bash
+./kunji validate -k "..."
+```
+
+### Tinify / TinyPNG
+```bash
+./kunji validate -k "..."
+```
+
+### PDFShift
+```bash
+./kunji validate -k "sk_..."
+```
+
+### Vimeo
+```bash
+./kunji validate -k "..."
+```
+
+### Mux (Video Streaming)
+```bash
+./kunji validate -k "..."  # Composite: access_key:secret_key
+```
+
+### Confluent (Kafka)
+```bash
+./kunji validate -k "..."  # Composite: api_key:api_secret
+```
+
+### GoDaddy
+```bash
+./kunji validate -k "..."  # Composite: key:secret
+```
+
+### Porkbun
+```bash
+./kunji validate -k "..."  # Composite: apikey:secretapikey
+```
+
+---
+
+## Localization
+
+### Crowdin
+```bash
+./kunji validate -k "..."
+```
+
+### Transifex
+```bash
+./kunji validate -k "..."
+```
+
+### Phrase
+```bash
+./kunji validate -k "..."
+```
+
+---
+
+## Feature Flags
+
+### LaunchDarkly
+```bash
+./kunji validate -k "ld-..."
+```
+
+### Split.io
+```bash
+./kunji validate -k "..."
+```
+
+---
+
+## E-commerce & CMS
+
+### Shopify
+```bash
+./kunji validate -k "shpat_..."
+./kunji validate -k "shpss_..."
+```
+
+### WooCommerce
+```bash
+./kunji validate -k "..."  # Composite: domain:ck_...
+```
+
+### BigCommerce
+```bash
+./kunji validate -k "bc_..."
+```
+
+### Recharge (Subscriptions)
+```bash
+./kunji validate -k "..."
+```
+
+### Strapi
+```bash
+./kunji validate -k "strapi_..."
+```
+
+### Sanity
+```bash
+./kunji validate -k "sk..."
+```
+
+### Webflow
+```bash
+./kunji validate -k "wf_..."
+```
+
+### Storyblok
+```bash
+./kunji validate -k "storyblok_..."
+```
+
+### DatoCMS
+```bash
+./kunji validate -k "..."
+```
+
+### Prismic
+```bash
+./kunji validate -k "..."
+```
+
+---
+
+## Blockchain
+
+### Alchemy
+```bash
+./kunji validate -k "alchemy_..."
+```
+
+### Infura
+```bash
+./kunji validate -k "infura_..."
+```
+
+### QuickNode
+```bash
+./kunji validate -k "qn-..."
+```
+
+### CoinGecko
+```bash
+./kunji validate -k "CG-..."
+```
+
+### Etherscan
+```bash
+./kunji validate -k "etherscan_..."
+```
+
+### CoinMarketCap
+```bash
+./kunji validate -k "cmc_..."
+```
+
+---
+
+## Testing
+
+### LambdaTest
+```bash
+./kunji validate -k "lambdatest_..."
+```
+
+### Percy
+```bash
+./kunji validate -k "percy_..."
+```
+
+### TestRail
+```bash
+./kunji validate -k "testrail_..."
+```
+
+### TestingBot
+```bash
+./kunji validate -k "testingbot_..."
+```
+
+### Chromatic
+```bash
+./kunji validate -k "chromatic_..."
+```
+
+---
+
+## Deployment
+
+### Koyeb
+```bash
+./kunji validate -k "koyeb_..."
+```
+
+### Coolify
+```bash
+./kunji validate -k "coolify_..."
+```
+
+---
+
+## Search
+
+### Algolia
+```bash
+./kunji validate -k "..."  # Composite: appid:key
+```
+
+### Meilisearch
+```bash
+./kunji validate -k "meilisearch_..."
+```
+
+### Typesense
+```bash
+./kunji validate -k "typesense_..."
 ```
 
 ---
@@ -862,6 +1455,23 @@ Limit detection to specific categories:
 ```bash
 # Skip keys already validated
 ./kunji validate -f keys.txt --resume -o results.csv
+
+# Resume with encrypted output
+./kunji validate -f keys.txt --resume -o results.csv --password "my-secret"
+```
+
+### Quiet Mode
+
+```bash
+# Suppress all output except results (useful for piping)
+./kunji validate -f keys.txt --quiet --format json
+```
+
+### Encrypted Output
+
+```bash
+# Encrypt results with a password
+./kunji validate -f keys.txt -o results.json --password "my-secret"
 ```
 
 ---
@@ -893,7 +1503,7 @@ socks5://user:pass@host:port
 ## View All Supported Providers
 
 ```bash
-# List all 258 supported providers
+# List all 351 supported providers
 ./kunji validate --list
 ```
 
@@ -903,17 +1513,28 @@ socks5://user:pass@host:port
 
 | Flag | Short | Default | Description |
 |------|-------|---------|-------------|
-| `--key` | `-k` | - | Single API key |
+| `--key` | `-k` | - | Single API key to validate |
 | `--keys` | `-f` | - | File with keys (one per line) |
-| `--out` | `-o` | results.txt | Output file (.txt, .csv, .json) |
+| `--out` | `-o` | - | Output file (.txt, .csv, .json, .jsonl) |
 | `--provider` | `-p` | auto | Force specific provider |
-| `--category` | `-c` | all | Filter by category (llm, common) |
-| `--threads` | `-t` | 10 | Concurrent workers |
-| `--timeout` | - | 15 | Request timeout (seconds) |
-| `--retries` | `-r` | 3 | Retry count |
-| `--proxy` | - | - | Proxy URL or file |
-| `--resume` | - | false | Skip existing results |
-| `--list` | `-l` | - | List all providers |
+| `--category` | `-c` | all | Filter by category |
+| `--threads` | `-t` | 10 | Concurrent workers (1-100) |
+| `--timeout` | - | 15 | Request timeout in seconds (5-120) |
+| `--retries` | `-r` | 3 | Retry count for failures/429 (0-10) |
+| `--proxy` | - | - | Proxy URL or proxy list file |
+| `--resume` | - | false | Skip already-validated keys |
+| `--list` | `-l` | - | List all supported providers |
+| `--only-valid` | - | false | Only output valid keys |
+| `--min-balance` | - | 0.0 | Minimum balance to consider key valid |
+| `--skip-metadata` | - | false | Skip metadata extraction for speed |
+| `--no-canary-check` | - | true | Disable canary/honeypot detection |
+| `--custom-providers` | - | - | Path to custom provider YAML files |
+| `--dry-run` | - | false | Detect providers without network requests |
+| `--deep-scan` | - | false | Try multiple providers on ambiguous keys |
+| `--password` | - | - | Encrypt output / decrypt resume files |
+| `--bench` | - | false | Benchmark: 3 tests per key for avg latency |
+| `--quiet` | - | false | Suppress banner, progress, summary |
+| `--format` | - | text | Output format: text or json |
 
 ---
 
@@ -921,7 +1542,7 @@ socks5://user:pass@host:port
 
 ### Valid Key Output
 ```
-✅ OpenAI
+OpenAI
    Key: sk-proj-****abc123
    Balance: $12.50
    Email: user@example.com
@@ -930,7 +1551,7 @@ socks5://user:pass@host:port
 
 ### Invalid Key Output
 ```
-❌ OpenAI
+OpenAI
    Key: sk-proj-****xyz789
    Status: Invalid
 ```
@@ -948,7 +1569,7 @@ sk-test-****,openai,false,,,Invalid API key
   {
     "key": "sk-proj-****abc123",
     "provider": "openai",
-    "valid": true,
+    "is_valid": true,
     "balance": 12.50,
     "email": "user@example.com"
   }
@@ -964,6 +1585,10 @@ sk-test-****,openai,false,,,Invalid API key
 3. **Use proxy rotation** to avoid rate limits
 4. **Use --resume** to continue interrupted validations
 5. **Force provider** when auto-detection fails
+6. **Use --deep-scan** when keys could belong to multiple providers
+7. **Use --skip-metadata** for faster bulk validation when you only need valid/invalid status
+8. **Use --password** to encrypt output files containing sensitive keys
+9. **Pipe with --quiet --format json** for integration with other tools
 
 ---
 
@@ -971,6 +1596,7 @@ sk-test-****,openai,false,,,Invalid API key
 
 ### "Provider not detected"
 - Use `-p <provider>` to force
+- Use `--deep-scan` to try multiple providers
 
 ### "Too many requests" / Rate Limited
 - Use proxy rotation: `--proxy proxies.txt`
@@ -987,11 +1613,13 @@ sk-test-****,openai,false,,,Invalid API key
 
 ---
 
-## 🔒 Security Note
+## Security Note
 
 Kunji handles sensitive API keys. Please observe the following security best practices:
 
 1. **Result File Permissions:** Kunji automatically creates result files with restrictive permissions (`0600` - readable only by your user). Do not change these permissions unless necessary.
 2. **Plaintext Storage:** Validated keys are stored in plaintext within the output files. **Encrypt or securely delete** these files after use.
-3. **SSRF Prevention:** Kunji includes built-in protection to prevent SSRF attacks when using composite keys with custom hosts. It will block requests to local or private IP addresses.
-4. **Error Masking:** Kunji automatically scrubs API keys from error messages captured from providers to prevent accidental leakage in logs and result files.
+3. **Encrypted Output:** Use `--password` to encrypt output files with AES-256-GCM.
+4. **SSRF Prevention:** Kunji includes built-in protection to prevent SSRF attacks when using composite keys with custom hosts. It will block requests to local or private IP addresses.
+5. **Error Masking:** Kunji automatically scrubs API keys from error messages captured from providers to prevent accidental leakage in logs and result files.
+6. **Canary Detection:** Built-in canary/honeypot token detection identifies and skips known honeypot keys (GitHub, AWS, etc.) to avoid triggering alerts.

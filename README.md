@@ -11,7 +11,7 @@
 **Universal API Key Validation Engine**
 
 [![Go](https://img.shields.io/badge/Go-1.21%2B-00ADD8?style=flat-square&logo=go)](https://golang.org)
-[![Version](https://img.shields.io/badge/Version-1.0.7-magenta?style=flat-square)](https://github.com/Grey-Magic/kunji/releases)
+[![Version](https://img.shields.io/badge/Version-1.0.8-magenta?style=flat-square)](https://github.com/Grey-Magic/kunji/releases)
 [![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey?style=flat-square)](#installation)
 [![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)](LICENSE)
 
@@ -70,7 +70,7 @@ go install github.com/Grey-Magic/kunji@latest
 Download the latest release for your platform:
 ```bash
 # Example for Linux/macOS
-curl -sL https://github.com/Grey-Magic/kunji/releases/latest/download/kunji_1.0.7.zip -o kunji.zip
+curl -sL https://github.com/Grey-Magic/kunji/releases/latest/download/kunji_1.0.8.zip -o kunji.zip
 unzip kunji.zip && chmod +x kunji
 sudo mv kunji /usr/local/bin/
 ```
