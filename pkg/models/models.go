@@ -13,12 +13,14 @@ type ValidationResult struct {
 	StatusNote   string                 `json:"status_note,omitempty"`
 	ResponseTime float64                `json:"response_time_sec"`
 	ErrorMessage string                 `json:"error_message,omitempty"`
+	ResponseBody string                 `json:"response_body,omitempty"`
 	Balance      float64                `json:"balance,omitempty"`
 	AccountName  string                 `json:"account_name,omitempty"`
 	Email        string                 `json:"email,omitempty"`
 	RetryAfter   int                    `json:"-"`
 	ModelAccess  []string               `json:"model_access,omitempty"`
 	Extra        map[string]interface{} `json:"extra,omitempty"`
+	GraphQLInfo  string                 `json:"graphql_info,omitempty"`
 }
 
 func (r *ValidationResult) GetExtraString(key string) string {
