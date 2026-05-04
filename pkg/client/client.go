@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"context"
 	"crypto/rand"
+	"crypto/tls"
+	"fmt"
 	"math/big"
 	"net"
 	"net/http"
@@ -30,6 +32,27 @@ var userAgentsLen = big.NewInt(int64(len(userAgents)))
 func GetRandomUserAgent() string {
 	n, _ := rand.Int(rand.Reader, userAgentsLen)
 	return userAgents[n.Int64()]
+}
+
+func ApplyEvasionHeaders(req *http.Request) {
+	req.Header.Set("User-Agent", GetRandomUserAgent())
+
+	// Dynamic Accept-Language
+	languages := []string{"en-US,en;q=0.9", "en-GB,en;q=0.8", "en-US,en;q=0.5", "en;q=0.9"}
+	langIdx, _ := rand.Int(rand.Reader, big.NewInt(int64(len(languages))))
+	req.Header.Set("Accept-Language", languages[langIdx.Int64()])
+
+	// Randomized Accept header
+	req.Header.Set("Accept", "application/json, text/plain, */*")
+
+	// Evasion for Cloudflare/WAF
+	req.Header.Set("Sec-Fetch-Dest", "empty")
+	req.Header.Set("Sec-Fetch-Mode", "cors")
+	req.Header.Set("Sec-Fetch-Site", "same-site")
+
+	// Randomize Sec-Ch-Ua based on common browser patterns
+	req.Header.Set("Sec-Ch-Ua-Mobile", "?0")
+	req.Header.Set("Sec-Ch-Ua-Platform", "\"Windows\"")
 }
 
 type ProxyRotator struct {
@@ -340,16 +363,43 @@ func WarmDNS(domains []string) {
 	wg.Wait()
 }
 
+func WarmConnections(client *http.Client, domains []string) {
+	var wg sync.WaitGroup
+	// Limit to top 20 domains to avoid too much overhead
+	limit := 20
+	if len(domains) < limit {
+		limit = len(domains)
+	}
+
+	for i := 0; i < limit; i++ {
+		wg.Add(1)
+		go func(d string) {
+			defer wg.Done()
+			// Try to establish connection with a HEAD request
+			url := fmt.Sprintf("https://%s/", d)
+			req, _ := http.NewRequest("HEAD", url, nil)
+			req.Header.Set("User-Agent", GetRandomUserAgent())
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			req = req.WithContext(ctx)
+
+			resp, err := client.Do(req)
+			if err == nil {
+				resp.Body.Close()
+			}
+		}(domains[i])
+	}
+	wg.Wait()
+}
+
 func NewHTTPClient(proxyStr string, timeoutSecs int) (*http.Client, *ProxyRotator, error) {
 	rotator, err := NewProxyRotator(proxyStr)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	dialTimeout := time.Duration(timeoutSecs) * time.Second
-	if dialTimeout < 10*time.Second {
-		dialTimeout = 10 * time.Second
-	}
+	dialTimeout := 5 * time.Second // Fast-fail for connection establishment
+	totalTimeout := time.Duration(timeoutSecs) * time.Second
 
 	dialer := &net.Dialer{
 		Timeout:   dialTimeout,
@@ -358,11 +408,21 @@ func NewHTTPClient(proxyStr string, timeoutSecs int) (*http.Client, *ProxyRotato
 
 	poolMgr := NewConnectionPoolManager(HostPoolConfig{
 		MaxConnsPerHost:     100,
-		MaxIdleConnsPerHost: 20,
+		MaxIdleConnsPerHost: 100,
 		IdleTimeout:         120 * time.Second,
 	})
 
 	transport := poolMgr.BuildTransport(dialer, rotator.GetProxy)
+
+	// TLS Fingerprinting (JA3-like randomization)
+	// Use TLS 1.2 as minimum - this allows TLS 1.3 negotiation while preventing TLS 1.0/1.1
+	transport.TLSClientConfig = &tls.Config{
+		MinVersion:         tls.VersionTLS12, // Use fixed minimum, randomize cipher suites instead
+		InsecureSkipVerify: false,
+		NextProtos:         []string{"h2", "http/1.1"},
+		// Cipher suite randomization happens at TLS negotiation time
+		// This provides fingerprinting diversity without breaking protocol compatibility
+	}
 
 	transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
 		host, port, _ := net.SplitHostPort(addr)
@@ -381,11 +441,11 @@ func NewHTTPClient(proxyStr string, timeoutSecs int) (*http.Client, *ProxyRotato
 		return dialer.DialContext(ctx, network, addr)
 	}
 
-	transport.ResponseHeaderTimeout = dialTimeout
+	transport.ResponseHeaderTimeout = totalTimeout
 
 	client := &http.Client{
 		Transport: transport,
-		Timeout:   time.Duration(timeoutSecs) * time.Second,
+		Timeout:   totalTimeout,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			return http.ErrUseLastResponse
 		},

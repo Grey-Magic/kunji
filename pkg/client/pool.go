@@ -27,7 +27,7 @@ type HostPoolConfig struct {
 
 var DefaultHostPoolConfig = HostPoolConfig{
 	MaxConnsPerHost:     100,
-	MaxIdleConnsPerHost: 20,
+	MaxIdleConnsPerHost: 100,
 	IdleTimeout:         120 * time.Second,
 }
 
