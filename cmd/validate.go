@@ -15,28 +15,28 @@ import (
 )
 
 var (
-	singleKey       string
-	keysFile        string
-	outputFile      string
-	provider        string
-	category        string
-	threads         int
-	proxy           string
-	retries         int
-	timeout         int
-	resume          bool
-	list            bool
-	onlyValid       bool
-	minBalance      float64
-	customProviders string
-	skipMetadata    bool
-	canaryCheck     bool
-	dryRun          bool
-	bench           bool
-	password        string
-	deepScan        bool
-	quiet           bool
-	format          string
+	singleKey    string
+	keysFile     string
+	outputFile   string
+	provider     string
+	category     string
+	threads      int
+	proxy        string
+	retries      int
+	timeout      int
+	resume       bool
+	list         bool
+	onlyValid    bool
+	minBalance   float64
+	templatesDir string
+	skipMetadata bool
+	canaryCheck  bool
+	dryRun       bool
+	bench        bool
+	password     string
+	deepScan     bool
+	quiet        bool
+	format       string
 )
 
 var validateCmd = &cobra.Command{
@@ -49,8 +49,8 @@ var validateCmd = &cobra.Command{
 			PrintBanner()
 		}
 
-		if customProviders != "" {
-			validators.CustomProvidersDir = customProviders
+		if templatesDir != "" {
+			validators.CustomProvidersDir = templatesDir
 		}
 
 		if list {
@@ -225,7 +225,7 @@ func init() {
 	validateCmd.Flags().StringVarP(&outputFile, "out", "o", "", "Output file for valid keys/results (can be .txt, .csv, .json, or .jsonl)")
 	validateCmd.Flags().StringVarP(&provider, "provider", "p", "", "Force a specific provider (e.g. 'stripe', 'openai') to bypass regex auto-detection")
 	validateCmd.Flags().StringVarP(&category, "category", "c", "", "Limit regex auto-detection to a specific category (e.g. 'llm', 'payments')")
-	validateCmd.Flags().IntVarP(&threads, "threads", "t", 10, "Number of concurrent validation workers (1-100)")
+	validateCmd.Flags().IntVarP(&threads, "threads", "t", 40, "Number of concurrent validation workers (1-100)")
 	validateCmd.Flags().StringVar(&proxy, "proxy", "", "Proxy string (http://... or socks5://...) or path to proxy file")
 	validateCmd.Flags().IntVarP(&retries, "retries", "r", 3, "Number of retries for failures or 429 Too Many Requests (0-10)")
 	validateCmd.Flags().IntVar(&timeout, "timeout", 15, "Timeout in seconds per validation request (5-120)")
@@ -236,7 +236,7 @@ func init() {
 	validateCmd.Flags().BoolVar(&skipMetadata, "skip-metadata", false, "Skip fetching account metadata (balance, name, etc.) for speed")
 	validateCmd.Flags().BoolVar(&canaryCheck, "no-canary-check", true, "Disable automated canary/honeypot token detection")
 	validateCmd.Flags().Float64Var(&minBalance, "min-balance", 0.0, "Minimum balance required to consider key valid and output it")
-	validateCmd.Flags().StringVar(&customProviders, "custom-providers", "", "Path to directory containing custom provider YAML files")
+	validateCmd.Flags().StringVarP(&templatesDir, "templates", "T", "", "Path to directory containing custom provider YAML files")
 	validateCmd.Flags().BoolVar(&dryRun, "dry-run", false, "Detect providers without making network requests")
 	validateCmd.Flags().BoolVar(&deepScan, "deep-scan", false, "Try multiple providers if detection is ambiguous or fails")
 	validateCmd.Flags().StringVar(&password, "password", "", "Password to encrypt output files or decrypt resume files")
