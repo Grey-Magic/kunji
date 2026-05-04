@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Grey-Magic/kunji/pkg/validators"
 	"github.com/Grey-Magic/kunji/pkg/utils"
+	"github.com/Grey-Magic/kunji/pkg/validators"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

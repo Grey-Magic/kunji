@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"math/big"
+	"net/http"
 	"net/url"
 	"os"
 	"os/signal"
@@ -48,7 +49,9 @@ type Runner struct {
 	Factory          *validators.ValidatorFactory
 	Detector         *validators.Detector
 	ProxyRotator     *client.ProxyRotator
-	sharedHTTPClient interface{}
+	sharedHTTPClient *http.Client
+	negativeCache    *utils.BloomFilter
+	negCachePath     string
 	metadataJobs     chan *models.ValidationResult
 	metadataWg       sync.WaitGroup
 }
@@ -59,7 +62,19 @@ func NewRunner(threads int, proxy string, retries int, timeout int, out string, 
 		return nil, err
 	}
 
-	go client.WarmDNS(validators.GetCommonDomains())
+	domains := validators.GetCommonDomains()
+	go func() {
+		client.WarmDNS(domains)
+		if factory.SharedClient() != nil {
+			client.WarmConnections(factory.SharedClient(), domains)
+		}
+	}()
+
+	negCachePath := ".kunji_neg_cache"
+	negCache, err := utils.LoadBloomFilter(negCachePath)
+	if err != nil {
+		negCache = utils.NewBloomFilter(1000000, 0.01)
+	}
 
 	return &Runner{
 		Threads:        threads,
@@ -78,6 +93,8 @@ func NewRunner(threads int, proxy string, retries int, timeout int, out string, 
 		Factory:        factory,
 		Detector:       validators.NewDetectorFromConfigs(configs),
 		ProxyRotator:   rotator,
+		negativeCache:  negCache,
+		negCachePath:   negCachePath,
 	}, nil
 }
 
@@ -149,6 +166,9 @@ func (r *Runner) Run(keyReader io.Reader, totalKeys int) {
 		pterm.Success.Printfln("Streaming %d deduplicated and well-formatted keys...", totalKeys)
 	}
 
+	updateCounter := 0
+	updateCounterMutex := sync.Mutex{}
+
 	bufferSize := 1000
 	if totalKeys < bufferSize {
 		bufferSize = totalKeys
@@ -158,8 +178,8 @@ func (r *Runner) Run(keyReader io.Reader, totalKeys int) {
 	}
 
 	jobs := make(chan string, bufferSize)
-	results := make(chan *models.ValidationResult, bufferSize)
-	r.metadataJobs = make(chan *models.ValidationResult, bufferSize)
+	results := make(chan *models.ValidationResult, totalKeys+1)
+	r.metadataJobs = make(chan *models.ValidationResult, totalKeys+1)
 	var wg sync.WaitGroup
 
 	numWorkers := r.Threads
@@ -207,15 +227,31 @@ func (r *Runner) Run(keyReader io.Reader, totalKeys int) {
 		for scanner.Scan() {
 			key := strings.TrimSpace(scanner.Text())
 			if len(key) < r.MinKeyLength {
+				updateCounterMutex.Lock()
+				updateCounter++
+				updateCounterMutex.Unlock()
 				continue
 			}
 
 			if uniqueKeys.Test(key) {
+				updateCounterMutex.Lock()
+				updateCounter++
+				updateCounterMutex.Unlock()
 				continue
 			}
 			uniqueKeys.Add(key)
 
+			if r.negativeCache.Test(key) {
+				updateCounterMutex.Lock()
+				updateCounter++
+				updateCounterMutex.Unlock()
+				continue
+			}
+
 			if r.Resume && alreadyProcessed.Test(key) {
+				updateCounterMutex.Lock()
+				updateCounter++
+				updateCounterMutex.Unlock()
 				continue
 			}
 
@@ -241,7 +277,7 @@ func (r *Runner) Run(keyReader io.Reader, totalKeys int) {
 	var p *pterm.ProgressbarPrinter
 	showUI := totalKeys > 1 && !r.Quiet
 	if showUI {
-		pp := pterm.DefaultProgressbar.WithTotal(totalKeys).WithTitle("Validating API Keys")
+		pp := pterm.DefaultProgressbar.WithTotal(totalKeys).WithTitle("Validating API Keys").WithRemoveWhenDone(true)
 		p, _ = pp.Start()
 	}
 
@@ -267,8 +303,6 @@ func (r *Runner) Run(keyReader io.Reader, totalKeys int) {
 	collectAllResults := r.OutFile == "" || strings.HasSuffix(strings.ToLower(r.OutFile), ".json")
 	var allResults []models.ValidationResult
 
-	updateCounter := 0
-	updateCounterMutex := sync.Mutex{}
 	var progressTicker *time.Ticker
 	if showUI {
 		progressTicker = time.NewTicker(500 * time.Millisecond)
@@ -282,6 +316,8 @@ func (r *Runner) Run(keyReader io.Reader, totalKeys int) {
 	}
 
 	lastResults := make([]*models.ValidationResult, 0, 5)
+	providerStats := make(map[string]int)
+	var statsMu sync.Mutex
 
 	for {
 		var tickerChan <-chan time.Time
@@ -293,24 +329,42 @@ func (r *Runner) Run(keyReader io.Reader, totalKeys int) {
 		case <-tickerChan:
 			updateCounterMutex.Lock()
 			if p != nil && updateCounter > 0 {
-				current := p.Current
-				if current < totalKeys {
-					p.Increment()
-				}
+				p.Add(updateCounter)
 				updateCounter = 0
+
+				// Update progress bar title with speed and ETA
+				current := p.Current
+				if current > 0 {
+					elapsed := time.Since(startTime)
+					speed := float64(current) / elapsed.Seconds()
+					remaining := totalKeys - current
+					eta := time.Duration(float64(remaining)/speed) * time.Second
+					p.UpdateTitle(fmt.Sprintf("Validating API Keys [%.2f keys/s, ETA: %s]", speed, eta.Round(time.Second)))
+				}
 			}
 
-			var areaText string
-			for i := len(lastResults) - 1; i >= 0; i-- {
-				res := lastResults[i]
-				status := pterm.Red("✗ Invalid")
-				if res.IsValid {
-					status = pterm.Green("✓ Valid")
+			if area != nil {
+				var areaText string
+				for i := len(lastResults) - 1; i >= 0; i-- {
+					res := lastResults[i]
+					var status string
+					switch {
+					case res.IsValid:
+						status = pterm.Green("✓ Valid")
+					case res.StatusCode == 429:
+						status = pterm.Yellow("⚠ Rate Limited")
+					case strings.Contains(res.ErrorMessage, "Timeout") || strings.Contains(res.ErrorMessage, "proxy"):
+						status = pterm.Magenta("⧗ Network Error")
+					case strings.Contains(res.ErrorMessage, "Canary") || strings.Contains(res.ErrorMessage, "detect"):
+						status = pterm.Gray("∅ Skipped")
+					default:
+						status = pterm.Red("✗ Invalid")
+					}
+					keyMasked := maskKey(res.Key)
+					areaText += fmt.Sprintf("  %s %-15s %s %s\n", pterm.Gray("»"), pterm.LightCyan(res.Provider), status, pterm.Gray(keyMasked))
 				}
-				keyMasked := maskKey(res.Key)
-				areaText += fmt.Sprintf("  %s %-15s %s %s\n", pterm.Gray("»"), pterm.LightCyan(res.Provider), status, pterm.Gray(keyMasked))
+				area.Update(areaText)
 			}
-			area.Update(areaText)
 			updateCounterMutex.Unlock()
 
 		case res, ok := <-results:
@@ -324,6 +378,11 @@ func (r *Runner) Run(keyReader io.Reader, totalKeys int) {
 			}
 			if res.IsValid {
 				validCount++
+				statsMu.Lock()
+				providerStats[res.Provider]++
+				statsMu.Unlock()
+			} else if res.ErrorMessage != "Probe cancelled" && !strings.Contains(res.ErrorMessage, "Could not auto-detect") {
+				r.negativeCache.Add(res.Key)
 			}
 
 			updateCounterMutex.Lock()
@@ -358,6 +417,13 @@ func (r *Runner) Run(keyReader io.Reader, totalKeys int) {
 					allResults = append(allResults, *res)
 				}
 			}
+		default:
+			// If we have no ticker and no result yet, don't spin too fast
+			if progressTicker == nil {
+				// We still need to check the results channel, but select default won't wait.
+				// However, if we reach here it means results channel was not ready.
+				time.Sleep(10 * time.Millisecond)
+			}
 		}
 	}
 
@@ -366,6 +432,7 @@ done:
 		p.Stop()
 	}
 	if area != nil {
+		area.Clear()
 		area.Stop()
 	}
 
@@ -383,6 +450,11 @@ done:
 		r.exportResults(allResults)
 	} else if len(allResults) > 0 && !r.Quiet && r.Format != "json" {
 		r.displayResultsTable(allResults)
+	}
+
+	// Save negative cache
+	if r.negativeCache != nil {
+		r.negativeCache.Save(r.negCachePath)
 	}
 
 	duration := time.Since(startTime)
@@ -407,10 +479,11 @@ done:
 		{"Total Time", duration.Round(time.Millisecond).String()},
 	}
 
-	if !r.Quiet && r.Format != "json" {
+	if !r.Quiet && r.Format != "json" && totalKeys > 5 {
 		pterm.DefaultSection.Println("Validation Summary")
 		summaryTable, _ := pterm.DefaultTable.WithHasHeader().WithData(stats).Srender()
 		pterm.DefaultBox.WithTitle("Results").Println(summaryTable)
+
 		pterm.Println()
 	}
 }
@@ -793,6 +866,9 @@ func (r *Runner) displayValidKeysTable(results []models.ValidationResult) {
 		if res.Email != "" {
 			parts = append(parts, res.Email)
 		}
+		if res.GraphQLInfo != "" {
+			parts = append(parts, pterm.Magenta("GraphQL: ")+res.GraphQLInfo)
+		}
 
 		if res.Extra != nil {
 			if vip := res.GetExtraString("vip_level"); vip != "" {
@@ -823,9 +899,9 @@ func (r *Runner) displayValidKeysTable(results []models.ValidationResult) {
 
 		responseStr := fmt.Sprintf("%.2fs", res.ResponseTime)
 
-		statusStr := "✓ Valid"
+		statusStr := fmt.Sprintf("✓ Valid (%d)", res.StatusCode)
 		if res.StatusNote != "" {
-			statusStr = "⚠ " + res.StatusNote
+			statusStr = fmt.Sprintf("⚠ %s (%d)", res.StatusNote, res.StatusCode)
 		}
 
 		if res.StatusCode > 0 && res.StatusCode != 200 {
@@ -895,6 +971,23 @@ func (r *Runner) displayValidKeysTable(results []models.ValidationResult) {
 			}
 		}
 
+		if res.ResponseBody != "" || res.ErrorMessage != "" {
+			if !hasExtra {
+				pterm.Info.Printfln("%s %s:", res.Provider, pterm.Green("Additional Info:"))
+				hasExtra = true
+			}
+			if res.ResponseBody != "" {
+				bodyStr := res.ResponseBody
+				if len(bodyStr) > 200 {
+					bodyStr = bodyStr[:197] + "..."
+				}
+				pterm.Println("  " + pterm.Yellow("Response Body:") + " " + pterm.Gray(bodyStr))
+			}
+			if res.ErrorMessage != "" {
+				pterm.Println("  " + pterm.Yellow("Error Message:") + " " + pterm.Red(res.ErrorMessage))
+			}
+		}
+
 		if len(res.ModelAccess) > 0 {
 			if !hasExtra {
 				pterm.Info.Printfln("%s %s:", res.Provider, pterm.Green("Available Models:"))
@@ -927,43 +1020,43 @@ func (r *Runner) displayInvalidKeysTable(results []models.ValidationResult) {
 			errMsg = errMsg[:47] + "..."
 		}
 
-		statusStr := "✗ Invalid"
-		if res.InvalidReason != "" {
-			statusStr = "✗ " + res.InvalidReason
-		} else if res.StatusCode > 0 {
+		statusStr := fmt.Sprintf("✗ %s (%d)", res.InvalidReason, res.StatusCode)
+		if res.InvalidReason == "" && res.StatusCode > 0 {
 			switch res.StatusCode {
 			case 401:
-				statusStr = "✗ Unauthorized"
+				statusStr = fmt.Sprintf("✗ Unauthorized (%d)", res.StatusCode)
 			case 403:
-				statusStr = "✗ Forbidden"
+				statusStr = fmt.Sprintf("✗ Forbidden (%d)", res.StatusCode)
 			case 404:
-				statusStr = "✗ Not Found"
+				statusStr = fmt.Sprintf("✗ Not Found (%d)", res.StatusCode)
 			case 429:
-				statusStr = "✗ Rate Limited"
+				statusStr = fmt.Sprintf("✗ Rate Limited (%d)", res.StatusCode)
 			case 500:
-				statusStr = "✗ Server Error"
+				statusStr = fmt.Sprintf("✗ Server Error (%d)", res.StatusCode)
 			case 502, 503, 504:
 				statusStr = fmt.Sprintf("✗ Bad Gateway (%d)", res.StatusCode)
 			default:
-				statusStr = fmt.Sprintf("✗ %d", res.StatusCode)
+				if res.StatusCode > 0 {
+					statusStr = fmt.Sprintf("✗ %d", res.StatusCode)
+				}
 			}
 		}
 
 		if res.InvalidReason == "" {
 			if strings.Contains(strings.ToLower(res.ErrorMessage), "disabled") {
-				statusStr = "✗ Disabled"
+				statusStr = fmt.Sprintf("✗ Disabled (%d)", res.StatusCode)
 			} else if strings.Contains(strings.ToLower(res.ErrorMessage), "blocked") {
-				statusStr = "✗ Blocked"
+				statusStr = fmt.Sprintf("✗ Blocked (%d)", res.StatusCode)
 			} else if strings.Contains(strings.ToLower(res.ErrorMessage), "expired") {
-				statusStr = "✗ Expired"
+				statusStr = fmt.Sprintf("✗ Expired (%d)", res.StatusCode)
 			} else if strings.Contains(strings.ToLower(res.ErrorMessage), "revok") {
-				statusStr = "✗ Revoked"
+				statusStr = fmt.Sprintf("✗ Revoked (%d)", res.StatusCode)
 			} else if strings.Contains(strings.ToLower(res.ErrorMessage), "invalid") {
-				statusStr = "✗ Invalid Key"
+				statusStr = fmt.Sprintf("✗ Invalid Key (%d)", res.StatusCode)
 			} else if strings.Contains(strings.ToLower(res.ErrorMessage), "quota") {
-				statusStr = "✗ Quota Exceeded"
+				statusStr = fmt.Sprintf("✗ Quota Exceeded (%d)", res.StatusCode)
 			} else if strings.Contains(strings.ToLower(res.ErrorMessage), "insufficient") {
-				statusStr = "✗ Insufficient"
+				statusStr = fmt.Sprintf("✗ Insufficient (%d)", res.StatusCode)
 			}
 		}
 
@@ -991,6 +1084,18 @@ func (r *Runner) displayInvalidKeysTable(results []models.ValidationResult) {
 	}
 
 	pterm.DefaultTable.WithHasHeader().WithData(tableData).Render()
+
+	// Print response body for invalid keys as extra info
+	for _, res := range results {
+		if res.ResponseBody != "" && res.ResponseBody != res.ErrorMessage {
+			pterm.Info.Printfln("%s %s:", res.Provider, pterm.Red("Invalid Key Info:"))
+			bodyStr := res.ResponseBody
+			if len(bodyStr) > 200 {
+				bodyStr = bodyStr[:197] + "..."
+			}
+			pterm.Println("  " + pterm.Yellow("Response Body:") + " " + pterm.Gray(bodyStr))
+		}
+	}
 }
 
 func (r *Runner) exportResults(results []models.ValidationResult) {
