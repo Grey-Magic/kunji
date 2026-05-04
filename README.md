@@ -11,7 +11,7 @@
 **Universal API Key Validation Engine**
 
 [![Go](https://img.shields.io/badge/Go-1.21%2B-00ADD8?style=flat-square&logo=go)](https://golang.org)
-[![Version](https://img.shields.io/badge/Version-1.0.8-magenta?style=flat-square)](https://github.com/Grey-Magic/kunji/releases)
+[![Version](https://img.shields.io/badge/Version-1.0.9-magenta?style=flat-square)](https://github.com/Grey-Magic/kunji/releases)
 [![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey?style=flat-square)](#installation)
 [![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)](LICENSE)
 
@@ -28,11 +28,11 @@
 
 ---
 
-**Kunji** is a high-performance, concurrent CLI tool designed to rapidly validate API keys across 260+ services. Whether you're auditing infrastructure, testing integrations, or cleaning up configuration dumps, Kunji provides a safe, fast, and automated way to verify credentials.
+Kunji is a concurrent CLI tool for validating API keys across 350+ services. It uses a scoring-based detection engine and multi-threaded execution to verify credentials and extract associated metadata.
 
-## 🚀 Terminal Experience
+## Terminal Experience
 
-Kunji features a modern, interactive UI built with `pterm`, providing real-time feedback during bulk operations.
+Kunji provides real-time feedback during bulk validation operations.
 
 ```text
   ██   ██ ██    ██ ███    ██      ██ ██
@@ -41,118 +41,88 @@ Kunji features a modern, interactive UI built with `pterm`, providing real-time 
   ██  ██  ██    ██ ██  ██ ██ ██   ██ ██
   ██   ██  ██████  ██   ████  █████  ██
 
-Validating API Keys [256/260] ███████████████████████████████████░ 98%
-  » shopify         ✓ Valid    myshop:shpat_****abc123
+Validating API Keys [348/351] ███████████████████████████████████░ 99%
+  » supabase        ✓ Valid    eyJhbGciOiJIUzI1Ni... (JWT Decoded)
   » openai          ✓ Valid    sk-proj-****xyz789
   » stripe          ✗ Invalid  sk_live_****123456
-  » deepseek        ✓ Valid    sk-****def456
+  » deepseek        ✓ Valid    sk-****def456 (Hex Fingerprint)
 ```
 
-## ✨ Key Features
+## Features
 
-- 🔍 **Smart Auto-Detection** — Instantly identifies 260+ services via a high-speed prefix trie and sensitive regex fallback.
-- ⚡ **Concurrent Engine** — Multi-threaded worker pool handles thousands of keys in seconds with configurable throughput.
-- 📊 **Metadata Extraction** — Automatically retrieves account balance, email, usage limits, and organization names.
-- 🛡️ **Hardened Security** — Built-in SSRF protection, restrictive file permissions, and automatic secret scrubbing in logs.
-- 🔄 **Smart Resume & Retry** — Skip already-validated keys and handle intermittent network failures or rate limits with jittered backoff.
-- 📤 **Clean Export** — Generate structured reports in `.txt`, `.csv`, `.json`, or memory-efficient `.jsonl`.
-- 🕹️ **Interactive Paste Mode** — Paste blocks of text and let Kunji auto-extract and validate the keys.
-- 🕵️ **Dry Run Mode** — Detect providers without sending a single network request.
+### Detection and Analysis
+- **Scoring-based Auto-Detection** — Evaluates prefixes, regex specificity, and structural characteristics to identify providers.
+- **Structural Decoding** — Decodes JWTs (`eyJ...`) and identifies Hex/UUID fingerprints to resolve provider collisions.
+- **GraphQL Introspection** — Identifies root types and schema statistics for GraphQL-based services upon successful validation.
+- **Custom Templates** — Supports loading provider definitions from external YAML files via the `--templates` flag.
 
-## 📦 Installation
+### Security and Evasion
+- **Request Randomization** — Rotates HTTP headers and TLS fingerprints to prevent identification by WAFs or rate-limiters.
+- **Canary Detection** — Identifies common AWS and Slack canary tokens and high-entropy strings to prevent triggering security alerts.
+- **Secret Scrubbing** — Automatically masks API keys in output and logs.
 
-### Go Install (Recommended)
+### Performance Optimizations
+- **Aho-Corasick Scanning** — Uses a trie-based automaton to match multiple provider prefixes in a single pass.
+- **Zero-Copy Processing** — Minimizes memory allocations during string processing and key detection.
+- **Adaptive Throttling** — Adjusts request rates per-provider based on `429` (Too Many Requests) responses.
+- **Connection Warming** — Pre-resolves DNS and establishes TCP/TLS handshakes for common providers at startup.
+- **Persistent Negative Cache** — Uses a Bloom filter to store and skip confirmed invalid keys across sessions.
+
+## Installation
+
+### Go Install
 ```bash
 go install github.com/Grey-Magic/kunji@latest
 ```
 
 ### Prebuilt Binaries
-Download the latest release for your platform:
+Download the release for your platform:
 ```bash
 # Example for Linux/macOS
-curl -sL https://github.com/Grey-Magic/kunji/releases/latest/download/kunji_1.0.8.zip -o kunji.zip
+curl -sL https://github.com/Grey-Magic/kunji/releases/latest/download/kunji_1.0.9.zip -o kunji.zip
 unzip kunji.zip && chmod +x kunji
 sudo mv kunji /usr/local/bin/
 ```
 
 ---
 
-## 🛠️ Usage
-
-For a comprehensive guide including service-specific examples, see [**USAGE.md**](./USAGE.md).
+## Usage
 
 ### Basic Commands
 ```bash
-# Validate a single key (auto-detects provider)
+# Validate a single key
 kunji validate -k "sk-proj-..."
 
-# Bulk validation from a file with 20 workers
-kunji validate -f keys.txt -o results.csv -t 20
+# Bulk validation with custom templates
+kunji validate -f keys.txt -T ./my-templates/ -t 20
 
-# Resume an interrupted run, only keeping valid keys
+# Resume a run and skip known invalid keys
 kunji validate -f keys.txt --resume --only-valid -o results.jsonl
-
-# Quick interactive paste mode
-kunji interactive
-
-# Check your proxies
-kunji check-proxies --proxy proxies.txt
 ```
 
 ### Advanced Options
 | Flag | Description |
 |---|---|
-| `-p, --provider` | Force a specific provider (e.g., `openai`) to skip detection. |
-| `-c, --category` | Limit detection to a category (e.g., `llm`, `payments`). |
-| `--proxy` | Provide a single proxy or a file for automatic rotation. |
-| `--timeout` | Set custom request timeout (default: 15s). |
-| `--dry-run` | Detect providers without making network requests. |
-| `--custom-providers` | Load extra YAML provider definitions from a directory. |
+| `-T, --templates` | Path to directory containing custom provider YAML files. |
+| `--deep-scan` | Test multiple providers if detection is ambiguous. |
+| `--proxy` | Set a proxy URL or a file for rotation. |
+| `--dry-run` | Identify providers without sending network requests. |
+| `--skip-metadata` | Skip metadata enrichment steps. |
 
 ---
 
-## 🔒 Security First
+## Supported Providers (350+)
 
-Kunji is designed with data privacy and security as a core mandate:
-
-1. **User-Only Permissions:** All result files are created with `0600` permissions (`-rw-------`), ensuring only you can read your validated keys.
-2. **Secret Scrubbing:** Kunji automatically detects and masks API keys in error messages (`[MASKED_KEY]`) before they are saved to disk.
----
-
-## 🏛️ Supported Providers (260+)
-
-Kunji supports an extensive array of services across multiple domains:
-
-| Category | Top Services |
+| Category | Services |
 |---|---|
-| **Foundation LLMs** | OpenAI, Anthropic, Google Gemini, xAI, Mistral, DeepSeek |
-| **Cloud & Hosting** | Cloudflare, Vercel, Netlify, Railway, DigitalOcean, Heroku, Render |
-| **Databases** | MongoDB Atlas, Redis Cloud, ClickHouse, CockroachDB, TiDB, Neon |
-| **Security & OSINT** | Shodan, VirusTotal, Censys, FOFA, ZoomEye, Intelligence X |
-| **Auth & Identity** | Auth0, Clerk, WorkOS, Stytch, Frontegg, FusionAuth |
-| **DevOps & CICD** | GitHub, GitLab, NPM, Supabase, CircleCI, Travis CI, Pulumi, ArgoCD |
+| **LLMs** | OpenAI, Anthropic, Google Gemini, xAI, Mistral, DeepSeek |
+| **Hosting** | Cloudflare, Vercel, Netlify, Railway, DigitalOcean, Heroku, Render |
+| **Databases** | Supabase, MongoDB Atlas, Redis, ClickHouse, TiDB, Neon |
+| **Identity** | Auth0, Clerk, WorkOS, Stytch, Frontegg, FusionAuth |
 | **Payments** | Stripe, PayPal, Square, LemonSqueezy, Paddle, Plaid |
-| **CMS & E-com** | Shopify, WooCommerce, Strapi, Sanity, Contentful, Webflow, Prismic |
-| **Blockchain** | Alchemy, Infura, QuickNode, Etherscan, Moralis, Thirdweb |
 
 ---
 
-## 🤝 Contributing
+## License
 
-Adding a new provider is simple and requires **zero Go code**. Simply add a YAML entry to `pkg/validators/providers/`:
-
-```yaml
-- name: new_service
-  key_prefixes: ["ns-"]
-  key_patterns: ["^ns-[a-zA-Z0-9]{32}$"]
-  validation:
-    method: GET
-    url: "https://api.newservice.com/v1/user"
-    auth: "bearer"
-```
-
-See [**AGENTS.md**](./AGENTS.md) for full development guidelines.
-
-## 📄 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the MIT License.
