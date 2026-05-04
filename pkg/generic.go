@@ -1,0 +1,844 @@
+package validators
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"github.com/tidwall/gjson"
+	"io"
+	"net/http"
+	"regexp"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	"bytes"
+	"github.com/Grey-Magic/kunji/pkg/client"
+	"github.com/Grey-Magic/kunji/pkg/models"
+	"github.com/Grey-Magic/kunji/pkg/utils"
+)
+
+var bufferPool = sync.Pool{
+	New: func() interface{} {
+		return new(bytes.Buffer)
+	},
+}
+
+const graphqlIntrospectionQuery = `{"query": "{ __schema { queryType { name } mutationType { name } subscriptionType { name } types { name kind } directives { name } } }"}`
+
+type GenericValidator struct {
+	config           ProviderConfig
+	client           *http.Client
+	limiter          *client.RateLimiterManager
+	cache            *client.ValidationCache
+	bodyBytes        []byte
+	skipMetadata     bool
+	checkCanary      bool
+	compiledCanaryRe []*regexp.Regexp
+	canaryCompiled   bool
+}
+
+func NewGenericValidatorWithClient(cfg ProviderConfig, httpClient *http.Client, limiter *client.RateLimiterManager) *GenericValidator {
+	return &GenericValidator{
+		config:      cfg,
+		client:      httpClient,
+		limiter:     limiter,
+		bodyBytes:   []byte(cfg.Validation.Body),
+		checkCanary: true,
+	}
+}
+
+func NewGenericValidator(cfg ProviderConfig, proxy string, timeout int) (*GenericValidator, error) {
+	httpClient, _, err := client.NewHTTPClient(proxy, timeout)
+	if err != nil {
+		return nil, err
+	}
+
+	limiter := client.NewRateLimiterManager(10, 10)
+	return &GenericValidator{
+		config:      cfg,
+		client:      httpClient,
+		limiter:     limiter,
+		bodyBytes:   []byte(cfg.Validation.Body),
+		checkCanary: true,
+	}, nil
+}
+
+func (v *GenericValidator) Name() string          { return v.config.Name }
+func (v *GenericValidator) KeyPatterns() []string { return v.config.KeyPatterns }
+
+func (v *GenericValidator) SetSkipMetadata(skip bool) {
+	v.skipMetadata = skip
+}
+
+func (v *GenericValidator) SetCanaryCheck(check bool) {
+	v.checkCanary = check
+}
+
+func (v *GenericValidator) SetCache(cache *client.ValidationCache) {
+	v.cache = cache
+}
+
+func (v *GenericValidator) FetchMetadata(ctx context.Context, apiKey string, result *models.ValidationResult) {
+	if result == nil || !result.IsValid {
+		return
+	}
+	v.fetchChainMetadata(ctx, apiKey, nil, result)
+}
+
+func (v *GenericValidator) compileCanaryPatterns() {
+	if v.canaryCompiled {
+		return
+	}
+	v.canaryCompiled = true
+	v.compiledCanaryRe = make([]*regexp.Regexp, 0, len(v.config.CanaryPatterns))
+	for _, p := range v.config.CanaryPatterns {
+		re, err := regexp.Compile(p)
+		if err != nil {
+			continue
+		}
+		v.compiledCanaryRe = append(v.compiledCanaryRe, re)
+	}
+}
+
+func (v *GenericValidator) isCanaryToken(key string) bool {
+	if !v.checkCanary {
+		return false
+	}
+
+	// 1. confirmed canary markers (Very specific to avoid false positives)
+	globalCanaries := []string{
+		"xoxb-canary-",
+		"xoxp-canary-",
+		"canarytokens.org",
+		"thinkst.com",
+	}
+
+	for _, p := range globalCanaries {
+		if strings.Contains(key, p) {
+			return true
+		}
+	}
+
+	// 2. Provider-specific canary patterns from YAML
+	if len(v.config.CanaryPatterns) > 0 {
+		v.compileCanaryPatterns()
+		for _, re := range v.compiledCanaryRe {
+			if re.MatchString(key) {
+				return true
+			}
+		}
+	}
+
+	// 3. High-entropy trap detection (increased threshold)
+	// Only flag if extremely long and extremely high entropy, typical of "entropy traps"
+	if len(key) > 128 && utils.CalculateShannonEntropy(key) > 6.0 {
+		return true
+	}
+
+	return false
+}
+
+func (v *GenericValidator) performSyntaxCheck(key string) error {
+	if v.config.SyntaxCheck == "" {
+		return nil
+	}
+
+	switch v.config.SyntaxCheck {
+	case "base64":
+		parts := strings.Split(key, ":")
+		toCheck := key
+		if len(parts) == 2 {
+			toCheck = parts[1]
+		}
+
+		toCheck = strings.TrimPrefix(toCheck, "sk_live_")
+		toCheck = strings.TrimPrefix(toCheck, "sk_test_")
+
+		_, err := utils.Base64Decode(toCheck)
+		if err != nil {
+			return fmt.Errorf("invalid syntax: not a valid base64 string")
+		}
+	}
+	return nil
+}
+
+func (v *GenericValidator) categorizeInvalidKey(statusCode int, body []byte) string {
+	bodyStr := strings.ToLower(string(body))
+
+	switch {
+	case strings.Contains(bodyStr, "expired"):
+		return "Expired"
+	case strings.Contains(bodyStr, "revoked") || strings.Contains(bodyStr, "deactivated") || strings.Contains(bodyStr, "disabled"):
+		return "Revoked"
+	case strings.Contains(bodyStr, "suspended") || strings.Contains(bodyStr, "blocked") || strings.Contains(bodyStr, "banned"):
+		return "Suspended"
+	case strings.Contains(bodyStr, "invalid") || strings.Contains(bodyStr, "malformed") || strings.Contains(bodyStr, "format"):
+		return "Malformed"
+	}
+
+	if statusCode == 401 || statusCode == 403 {
+		return "Invalid"
+	}
+
+	return ""
+}
+
+func (v *GenericValidator) checkBodyError(bodyBytes []byte, result *models.ValidationResult) bool {
+	ec := v.config.Validation.ErrorCheck
+	if ec == nil || ec.JSONPath == "" {
+		return false
+	}
+
+	val := gjson.GetBytes(bodyBytes, ec.JSONPath)
+	if !val.Exists() {
+		return false
+	}
+
+	errVal := val.Int()
+	if errVal == 0 {
+		return false
+	}
+
+	result.IsValid = false
+	result.InvalidReason = "Invalid"
+
+	errMsgVal := gjson.GetBytes(bodyBytes, "base_resp.status_msg")
+	if errMsgVal.Exists() && errMsgVal.String() != "" {
+		result.ErrorMessage = errMsgVal.String()
+	} else {
+		errMsgVal = gjson.GetBytes(bodyBytes, "error.message")
+		if errMsgVal.Exists() {
+			result.ErrorMessage = errMsgVal.String()
+		} else {
+			result.ErrorMessage = fmt.Sprintf("API error code: %d", errVal)
+		}
+	}
+
+	return true
+}
+
+func (v *GenericValidator) Validate(ctx context.Context, apiKey string) (*models.ValidationResult, error) {
+	if v.isCanaryToken(apiKey) {
+		return &models.ValidationResult{
+			Key:          apiKey,
+			Provider:     v.Name(),
+			IsValid:      false,
+			ErrorMessage: "Canary/Honeypot token detected. Skipping network request for safety.",
+			StatusNote:   "Canary Detected",
+		}, nil
+	}
+
+	if err := v.performSyntaxCheck(apiKey); err != nil {
+		return &models.ValidationResult{
+			Key:          apiKey,
+			Provider:     v.Name(),
+			IsValid:      false,
+			ErrorMessage: err.Error(),
+			StatusNote:   "Offline Check Failed",
+		}, nil
+	}
+
+	if v.cache != nil {
+		if cached, ok := v.cache.Get(v.Name(), apiKey); ok {
+			return cached, nil
+		}
+	}
+
+	cfg := v.config.Validation
+	endpoints := v.buildEndpointList(cfg)
+
+	var result *models.ValidationResult
+	var resultErr error
+
+	if len(endpoints) <= 1 {
+		result, resultErr = v.validateWithEndpoint(ctx, apiKey, cfg, endpoints[0])
+	} else {
+		type resultPair struct {
+			result *models.ValidationResult
+			err    error
+		}
+
+		resultChan := make(chan resultPair, len(endpoints))
+		var wg sync.WaitGroup
+		probeCtx, cancel := context.WithCancel(ctx)
+		defer cancel()
+
+		for _, ep := range endpoints {
+			wg.Add(1)
+			go func(endpoint endpointInfo) {
+				defer wg.Done()
+				r, e := v.validateWithEndpoint(probeCtx, apiKey, cfg, endpoint)
+				if r != nil && r.IsValid {
+					cancel()
+				}
+				resultChan <- resultPair{result: r, err: e}
+			}(ep)
+		}
+
+		go func() {
+			wg.Wait()
+			close(resultChan)
+		}()
+
+		var validResult *models.ValidationResult
+		var firstErr error
+		var lastFailedResult *models.ValidationResult
+
+		for rp := range resultChan {
+			if rp.err != nil && firstErr == nil {
+				firstErr = rp.err
+			}
+			if rp.result != nil {
+				if rp.result.IsValid && validResult == nil {
+					validResult = rp.result
+				} else if !rp.result.IsValid {
+					if lastFailedResult == nil || rp.result.StatusCode > 0 {
+						lastFailedResult = rp.result
+					}
+				}
+			}
+		}
+
+		if validResult != nil {
+			result = validResult
+		} else if firstErr != nil {
+			resultErr = firstErr
+		} else if lastFailedResult != nil {
+			result = lastFailedResult
+		}
+	}
+
+	if v.cache != nil && result != nil {
+		v.cache.Set(v.Name(), apiKey, result)
+	}
+
+	if result != nil {
+		return result, nil
+	}
+
+	if resultErr != nil {
+		return &models.ValidationResult{
+			Key:          apiKey,
+			Provider:     v.Name(),
+			IsValid:      false,
+			ErrorMessage: fmt.Sprintf("All endpoints failed: %v", resultErr),
+		}, nil
+	}
+
+	return &models.ValidationResult{
+		Key:          apiKey,
+		Provider:     v.Name(),
+		IsValid:      false,
+		ErrorMessage: "All endpoints failed",
+	}, nil
+}
+
+type endpointInfo struct {
+	url     string
+	headers map[string]string
+}
+
+func (v *GenericValidator) buildEndpointList(cfg ValidationConfig) []endpointInfo {
+	endpoints := []endpointInfo{}
+
+	if len(cfg.Endpoints) > 0 {
+		for _, ep := range cfg.Endpoints {
+			headers := make(map[string]string)
+			for k, val := range cfg.Headers {
+				headers[k] = val
+			}
+			for k, val := range ep.Headers {
+				headers[k] = val
+			}
+			endpoints = append(endpoints, endpointInfo{
+				url:     ep.URL,
+				headers: headers,
+			})
+		}
+	}
+
+	if cfg.URL != "" {
+		endpoints = append(endpoints, endpointInfo{
+			url:     cfg.URL,
+			headers: cfg.Headers,
+		})
+	}
+
+	if len(endpoints) == 0 {
+		endpoints = append(endpoints, endpointInfo{
+			url:     cfg.URL,
+			headers: cfg.Headers,
+		})
+	}
+
+	return endpoints
+}
+
+func (v *GenericValidator) validateWithEndpoint(ctx context.Context, apiKey string, cfg ValidationConfig, ep endpointInfo) (*models.ValidationResult, error) {
+	if v.limiter != nil {
+		if err := v.limiter.Wait(ctx, v.Name()); err != nil {
+			return nil, err
+		}
+	}
+	start := time.Now()
+
+	url := strings.ReplaceAll(ep.url, "{{key}}", apiKey)
+
+	method := cfg.Method
+	var bodyReader io.Reader
+	isGraphQL := strings.ToUpper(method) == "GRAPHQL"
+
+	if isGraphQL {
+		method = "POST"
+		bodyReader = strings.NewReader(graphqlIntrospectionQuery)
+	} else {
+		bodyStr := string(v.bodyBytes)
+		bodyStr = strings.ReplaceAll(bodyStr, "{{key}}", apiKey)
+
+		if strings.Contains(apiKey, ":") {
+			parts := strings.SplitN(apiKey, ":", 2)
+			url = strings.ReplaceAll(url, "{{key.client_id}}", parts[0])
+			url = strings.ReplaceAll(url, "{{key.secret}}", parts[1])
+
+			bodyStr = strings.ReplaceAll(bodyStr, "{{key.client_id}}", parts[0])
+			bodyStr = strings.ReplaceAll(bodyStr, "{{key.secret}}", parts[1])
+		}
+
+		if len(bodyStr) > 0 {
+			bodyReader = strings.NewReader(bodyStr)
+		}
+	}
+
+	if err := utils.ValidateURL(url); err != nil {
+		return nil, fmt.Errorf("security error: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, method, url, bodyReader)
+	if err != nil {
+		return nil, err
+	}
+
+	v.applyAuth(req, cfg.Auth, apiKey)
+
+	if isGraphQL || len(v.bodyBytes) > 0 {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	for k, val := range ep.headers {
+		req.Header.Set(k, val)
+	}
+	client.ApplyEvasionHeaders(req)
+
+	resp, err := v.client.Do(req)
+	duration := time.Since(start).Seconds()
+
+	result := &models.ValidationResult{
+		Key:          apiKey,
+		Provider:     v.Name(),
+		Endpoint:     url,
+		ResponseTime: duration,
+	}
+
+	if err != nil {
+		if v.limiter != nil {
+			v.limiter.ReportResult(v.Name(), 500)
+		}
+		result.IsValid = false
+		result.ErrorMessage = fmt.Sprintf("Request failed: %v", err)
+		return result, nil
+	}
+	defer resp.Body.Close()
+
+	if v.limiter != nil {
+		v.limiter.ReportResult(v.Name(), resp.StatusCode)
+	}
+
+	result.StatusCode = resp.StatusCode
+	result.RetryAfter = utils.ParseRetryAfter(resp.Header)
+
+	buf := bufferPool.Get().(*bytes.Buffer)
+	buf.Reset()
+	defer bufferPool.Put(buf)
+
+	_, err = io.Copy(buf, io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		result.IsValid = false
+		result.ErrorMessage = fmt.Sprintf("Failed to read response body: %v", err)
+		return result, nil
+	}
+	bodyBytes := buf.Bytes()
+
+	// Store the response body (truncated if necessary)
+	if len(bodyBytes) > 1000 {
+		result.ResponseBody = string(bodyBytes[:1000]) + "..."
+	} else {
+		result.ResponseBody = string(bodyBytes)
+	}
+
+	switch {
+	case resp.StatusCode == 200:
+		if v.checkBodyError(bodyBytes, result) {
+			break
+		}
+		result.IsValid = true
+		if isGraphQL {
+			v.extractGraphQLMetadata(bodyBytes, result)
+		}
+		v.extractValidationMetadata(bodyBytes, result)
+		if !v.skipMetadata {
+			v.fetchChainMetadata(ctx, apiKey, resp, result)
+		}
+
+	case resp.StatusCode == 402:
+		result.IsValid = true
+		result.StatusNote = "No Balance"
+		result.ErrorMessage = utils.ParseAPIError(bodyBytes, apiKey)
+
+	case resp.StatusCode == 429:
+		result.IsValid = true
+		result.StatusNote = "Rate Limited"
+		result.ErrorMessage = utils.ParseAPIError(bodyBytes, apiKey)
+
+	case resp.StatusCode >= 500:
+		result.IsValid = true
+		result.StatusNote = fmt.Sprintf("Server Error (%d)", resp.StatusCode)
+		result.ErrorMessage = utils.ParseAPIError(bodyBytes, apiKey)
+
+	case resp.StatusCode == 401 || resp.StatusCode == 403:
+		result.IsValid = false
+		result.InvalidReason = v.categorizeInvalidKey(resp.StatusCode, bodyBytes)
+		result.ErrorMessage = utils.ParseAPIError(bodyBytes, apiKey)
+
+	default:
+		result.IsValid = false
+		result.ErrorMessage = utils.ParseAPIError(bodyBytes, apiKey)
+	}
+
+	return result, nil
+}
+
+func (v *GenericValidator) applyAuth(req *http.Request, auth string, apiKey string) {
+	if auth == "" || auth == "none" {
+		return
+	}
+	if auth == "bearer" {
+		req.Header.Set("Authorization", "Bearer "+apiKey)
+		return
+	}
+	if auth == "basic" {
+		req.SetBasicAuth(apiKey, "")
+		return
+	}
+	if auth == "basic_composite" {
+		parts := strings.SplitN(apiKey, ":", 2)
+		if len(parts) == 2 {
+			req.SetBasicAuth(parts[0], parts[1])
+		} else {
+			req.SetBasicAuth(apiKey, "")
+		}
+		return
+	}
+	if strings.HasPrefix(auth, "header:") {
+		headerName := strings.TrimPrefix(auth, "header:")
+		req.Header.Set(headerName, apiKey)
+		return
+	}
+	if strings.HasPrefix(auth, "query:") {
+		paramName := strings.TrimPrefix(auth, "query:")
+		q := req.URL.Query()
+		q.Set(paramName, apiKey)
+		req.URL.RawQuery = q.Encode()
+	}
+}
+
+func (v *GenericValidator) extractGraphQLMetadata(bodyBytes []byte, result *models.ValidationResult) {
+	data := gjson.GetBytes(bodyBytes, "data.__schema")
+	if !data.Exists() {
+		return
+	}
+
+	var info []string
+	if q := data.Get("queryType.name"); q.Exists() {
+		info = append(info, "Queries: "+q.String())
+	}
+	if m := data.Get("mutationType.name"); m.Exists() {
+		info = append(info, "Mutations: "+m.String())
+	}
+	if s := data.Get("subscriptionType.name"); s.Exists() {
+		info = append(info, "Subscriptions: "+s.String())
+	}
+
+	types := data.Get("types").Array()
+	objCount := 0
+	enumCount := 0
+	for _, t := range types {
+		kind := t.Get("kind").String()
+		if kind == "OBJECT" {
+			objCount++
+		} else if kind == "ENUM" {
+			enumCount++
+		}
+	}
+	info = append(info, fmt.Sprintf("Schema: %d Objects, %d Enums", objCount, enumCount))
+
+	result.GraphQLInfo = strings.Join(info, " | ")
+}
+
+func (v *GenericValidator) extractValidationMetadata(bodyBytes []byte, result *models.ValidationResult) {
+	mfv := v.config.MetadataFromValidation
+	if mfv == nil {
+		return
+	}
+
+	bodyStr := string(bodyBytes)
+
+	if mfv.RegexExtract != "" {
+		re, err := regexp.Compile(mfv.RegexExtract)
+		if err == nil {
+			matches := re.FindStringSubmatch(bodyStr)
+			if len(matches) > mfv.RegexExtractMatch {
+				if result.Extra == nil {
+					result.Extra = make(map[string]interface{})
+				}
+				result.Extra["regex_extracted"] = matches[mfv.RegexExtractMatch]
+			}
+		}
+	}
+
+	if mfv.BalancePath != "" {
+		bal := gjson.GetBytes(bodyBytes, mfv.BalancePath).Value()
+		if mfv.BalanceSubtractPath != "" {
+			sub := gjson.GetBytes(bodyBytes, mfv.BalanceSubtractPath).Value()
+			result.Balance = toFloat64(bal) - toFloat64(sub)
+		} else {
+			result.Balance = toFloat64(bal)
+		}
+	}
+
+	if mfv.QuotaPath != "" {
+		if result.Extra == nil {
+			result.Extra = make(map[string]interface{})
+		}
+		result.Extra["quota"] = gjson.GetBytes(bodyBytes, mfv.QuotaPath).Value()
+	}
+
+	if mfv.CreditsPath != "" {
+		if result.Extra == nil {
+			result.Extra = make(map[string]interface{})
+		}
+		result.Extra["credits"] = gjson.GetBytes(bodyBytes, mfv.CreditsPath).Value()
+	}
+
+	if mfv.VIPLevelPath != "" {
+		if result.Extra == nil {
+			result.Extra = make(map[string]interface{})
+		}
+		result.Extra["vip_level"] = gjson.GetBytes(bodyBytes, mfv.VIPLevelPath).Value()
+	}
+
+	if mfv.TeamNamePath != "" {
+		if result.Extra == nil {
+			result.Extra = make(map[string]interface{})
+		}
+		result.Extra["team_name"] = gjson.GetBytes(bodyBytes, mfv.TeamNamePath).Value()
+	}
+
+	if mfv.UsernamePath != "" {
+		if result.Extra == nil {
+			result.Extra = make(map[string]interface{})
+		}
+		result.Extra["username"] = gjson.GetBytes(bodyBytes, mfv.UsernamePath).Value()
+	}
+
+	if mfv.NamePath != "" {
+		nameRes := gjson.GetBytes(bodyBytes, mfv.NamePath)
+		if nameRes.Exists() && nameRes.String() != "" {
+			result.AccountName = nameRes.String()
+		} else if mfv.NameFallbackPath != "" {
+			fallbackRes := gjson.GetBytes(bodyBytes, mfv.NameFallbackPath)
+			if fallbackRes.Exists() {
+				result.AccountName = fallbackRes.String()
+			}
+		}
+	}
+
+	if mfv.EmailPath != "" {
+		emailRes := gjson.GetBytes(bodyBytes, mfv.EmailPath)
+		if emailRes.Exists() {
+			result.Email = emailRes.String()
+		}
+	}
+}
+
+func (v *GenericValidator) fetchChainMetadata(ctx context.Context, apiKey string, validationResp *http.Response, result *models.ValidationResult) {
+	if len(v.config.Metadata) == 0 {
+		return
+	}
+
+	variables := make(map[string]string)
+	variables["key"] = apiKey
+	if strings.Contains(apiKey, ":") {
+		parts := strings.SplitN(apiKey, ":", 2)
+		variables["key.client_id"] = parts[0]
+		variables["key.secret"] = parts[1]
+	}
+
+	var varsMu sync.Mutex
+	var resultMu sync.Mutex
+
+	currentBatch := []MetadataConfig{}
+	producedInPreviousBatches := make(map[string]bool)
+	producedInPreviousBatches["key"] = true
+	producedInPreviousBatches["key.client_id"] = true
+	producedInPreviousBatches["key.secret"] = true
+
+	for i, step := range v.config.Metadata {
+		dependsOnNewVar := false
+		for varName := range variables {
+			if !producedInPreviousBatches[varName] && strings.Contains(step.URL, "{{"+varName+"}}") {
+				dependsOnNewVar = true
+				break
+			}
+		}
+
+		if dependsOnNewVar && len(currentBatch) > 0 {
+			v.runMetadataBatch(ctx, currentBatch, variables, &varsMu, &resultMu, validationResp, result)
+			for k := range variables {
+				producedInPreviousBatches[k] = true
+			}
+			currentBatch = []MetadataConfig{}
+		}
+
+		currentBatch = append(currentBatch, step)
+
+		if i == len(v.config.Metadata)-1 {
+			v.runMetadataBatch(ctx, currentBatch, variables, &varsMu, &resultMu, validationResp, result)
+		}
+	}
+}
+
+func (v *GenericValidator) runMetadataBatch(ctx context.Context, batch []MetadataConfig, variables map[string]string, varsMu *sync.Mutex, resultMu *sync.Mutex, validationResp *http.Response, result *models.ValidationResult) {
+	var wg sync.WaitGroup
+	for _, step := range batch {
+		wg.Add(1)
+		go func(s MetadataConfig) {
+			defer wg.Done()
+
+			varsMu.Lock()
+			url := s.URL
+			for k, val := range variables {
+				url = strings.ReplaceAll(url, "{{"+k+"}}", val)
+			}
+			varsMu.Unlock()
+
+			if strings.Contains(url, "{{header.") {
+				for _, part := range strings.Split(url, "{{header.") {
+					if idx := strings.Index(part, "}}"); idx > 0 {
+						headerName := part[:idx]
+						headerVal := validationResp.Header.Get(headerName)
+						if headerVal != "" {
+							url = strings.ReplaceAll(url, "{{header."+headerName+"}}", headerVal)
+						}
+					}
+				}
+			}
+
+			method := s.Method
+			if method == "" {
+				method = "GET"
+			}
+
+			metadataCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+			defer cancel()
+
+			req, err := http.NewRequestWithContext(metadataCtx, method, url, nil)
+			if err != nil {
+				return
+			}
+
+			v.applyAuth(req, s.Auth, variables["key"])
+			for k, val := range s.Headers {
+				req.Header.Set(k, val)
+			}
+			client.ApplyEvasionHeaders(req)
+
+			resp, err := v.client.Do(req)
+			if err != nil {
+				return
+			}
+			defer resp.Body.Close()
+
+			buf := bufferPool.Get().(*bytes.Buffer)
+			buf.Reset()
+			defer bufferPool.Put(buf)
+
+			_, err = io.Copy(buf, io.LimitReader(resp.Body, 1<<20))
+			if err != nil {
+				return
+			}
+			respBytes := buf.Bytes()
+
+			if resp.StatusCode != 200 {
+				return
+			}
+
+			if s.RegexExtract != "" {
+				re, err := regexp.Compile(s.RegexExtract)
+				if err == nil {
+					matches := re.FindStringSubmatch(string(respBytes))
+					if len(matches) > s.RegexExtractMatch {
+						if s.StoreAs != "" {
+							varsMu.Lock()
+							variables[s.StoreAs] = matches[s.RegexExtractMatch]
+							varsMu.Unlock()
+						}
+					}
+				}
+			}
+
+			if s.Extract != "" && s.StoreAs != "" {
+				val := gjson.GetBytes(respBytes, s.Extract)
+				if val.Exists() {
+					varsMu.Lock()
+					variables[s.StoreAs] = val.String()
+					varsMu.Unlock()
+				}
+			}
+
+			if s.BalancePath != "" {
+				bal := gjson.GetBytes(respBytes, s.BalancePath)
+				if bal.Exists() {
+					resultMu.Lock()
+					result.Balance = toFloat64(bal.Value())
+					resultMu.Unlock()
+				}
+			}
+		}(step)
+	}
+	wg.Wait()
+}
+
+func toFloat64(val interface{}) float64 {
+	if val == nil {
+		return 0
+	}
+	switch v := val.(type) {
+	case float64:
+		return v
+	case float32:
+		return float64(v)
+	case int:
+		return float64(v)
+	case int64:
+		return float64(v)
+	case string:
+		f, _ := strconv.ParseFloat(v, 64)
+		return f
+	case json.Number:
+		f, _ := v.Float64()
+		return f
+	default:
+		return 0
+	}
+}
