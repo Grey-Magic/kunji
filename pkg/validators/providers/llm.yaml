@@ -147,8 +147,8 @@
 
 - name: minimax
   category: llm
-  key_prefixes: ["minimax-"]
-  key_patterns: ["^minimax-[a-zA-Z0-9_-]{20,}$"]
+  key_prefixes: ["minimax-", "sk-api-", "sk-cp-"]
+  key_patterns: ["^minimax-[a-zA-Z0-9_-]{20,}$", "^sk-api-[a-zA-Z0-9_-]{40,}$", "^sk-cp-[a-zA-Z0-9_-]{40,}$"]
   validation:
     method: POST
     url: "https://api.minimax.io/v1/text/chatcompletion_v2"

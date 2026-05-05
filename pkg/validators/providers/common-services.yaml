@@ -566,7 +566,7 @@
     method: POST
     url: "https://safebrowsing.googleapis.com/v4/threatMatches:find?key={{key}}"
     auth: "none"
-    body: '{"client":{"clientId":"kunji","clientVersion":"1.0.5"},"threatInfo":{"threatTypes":["MALWARE","SOCIAL_ENGINEERING"],"platformTypes":["ANY_PLATFORM"],"threatEntryTypes":["URL"],"threatEntries":[{"url":"http://example.com"}]}}'
+    body: '{"client":{"clientId":"kunji","clientVersion":"1.0.9"},"threatInfo":{"threatTypes":["MALWARE","SOCIAL_ENGINEERING"],"platformTypes":["ANY_PLATFORM"],"threatEntryTypes":["URL"],"threatEntries":[{"url":"http://example.com"}]}}'
   metadata_from_validation:
     name_path: "matches"
 
