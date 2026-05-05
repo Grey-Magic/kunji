@@ -2,6 +2,8 @@ package validators
 
 import (
 	"embed"
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"io/fs"
 	"net/url"
@@ -16,6 +18,34 @@ import (
 	"github.com/pterm/pterm"
 	"gopkg.in/yaml.v3"
 )
+
+// ... (keep MetadataConfig and other existing types)
+
+func isHex(s string) bool {
+	match, _ := regexp.MatchString("^[a-f0-9]+$", strings.ToLower(s))
+	return match
+}
+
+func isUUID(s string) bool {
+	match, _ := regexp.MatchString("^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$", strings.ToLower(s))
+	return match
+}
+
+func decodeJWT(s string) map[string]interface{} {
+	parts := strings.Split(s, ".")
+	if len(parts) != 3 {
+		return nil
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return nil
+	}
+	var data map[string]interface{}
+	if err := json.Unmarshal(payload, &data); err != nil {
+		return nil
+	}
+	return data
+}
 
 //go:embed providers
 var providersFS embed.FS
@@ -77,6 +107,7 @@ type ProviderConfig struct {
 	Validation             ValidationConfig        `yaml:"validation"`
 	Metadata               []MetadataConfig        `yaml:"metadata,omitempty"`
 	MetadataFromValidation *MetadataFromValidation `yaml:"metadata_from_validation,omitempty"`
+	IsCustom               bool                    `yaml:"-"`
 }
 
 var (
@@ -159,8 +190,12 @@ func importCustomProviderConfigs(allConfigs *[]ProviderConfig, dir string) {
 
 		var configs []ProviderConfig
 		if err := yaml.Unmarshal(data, &configs); err != nil {
-			pterm.Warning.Printfln("Error parsing custom provider file %s: %v", path, err)
+			pterm.Warning.Printfln("Could not parse custom provider config %s: %v", path, err)
 			continue
+		}
+
+		for i := range configs {
+			configs[i].IsCustom = true
 		}
 
 		*allConfigs = append(*allConfigs, configs...)
@@ -182,18 +217,87 @@ type PatternEntry struct {
 
 type PrefixIndex map[string][]PrefixEntry
 
+type TrieNode struct {
+	children map[rune]*TrieNode
+	output   []*PrefixEntry
+	fail     *TrieNode
+}
+
+type PrefixTrie struct {
+	root *TrieNode
+}
+
+func NewPrefixTrie() *PrefixTrie {
+	return &PrefixTrie{root: &TrieNode{children: make(map[rune]*TrieNode)}}
+}
+
+func (t *PrefixTrie) Add(p *PrefixEntry) {
+	node := t.root
+	for _, r := range p.Prefix {
+		if node.children[r] == nil {
+			node.children[r] = &TrieNode{children: make(map[rune]*TrieNode)}
+		}
+		node = node.children[r]
+	}
+	node.output = append(node.output, p)
+}
+
+func (t *PrefixTrie) Build() {
+	queue := make([]*TrieNode, 0)
+	for _, child := range t.root.children {
+		child.fail = t.root
+		queue = append(queue, child)
+	}
+
+	for len(queue) > 0 {
+		u := queue[0]
+		queue = queue[1:]
+
+		for r, v := range u.children {
+			f := u.fail
+			for f != t.root && f.children[r] == nil {
+				f = f.fail
+			}
+			if f.children[r] != nil {
+				v.fail = f.children[r]
+			} else {
+				v.fail = t.root
+			}
+			v.output = append(v.output, v.fail.output...)
+			queue = append(queue, v)
+		}
+	}
+}
+
+func (t *PrefixTrie) Search(key string) []*PrefixEntry {
+	var results []*PrefixEntry
+	node := t.root
+	for _, r := range key {
+		if node.children[r] == nil {
+			break // Only match at the start
+		}
+		node = node.children[r]
+		if len(node.output) > 0 {
+			results = append(results, node.output...)
+		}
+	}
+	return results
+}
+
 type DetectorIndex struct {
 	prefixes         []PrefixEntry
 	patterns         []PatternEntry
 	prefixMap        PrefixIndex
 	providerPatterns map[string][]*regexp.Regexp
+	trie             *PrefixTrie
 }
 
-func BuildDetectionIndex(configs []ProviderConfig) ([]PrefixEntry, []PatternEntry, PrefixIndex, map[string][]*regexp.Regexp) {
-	var prefixes []PrefixEntry
-	var patterns []PatternEntry
-	prefixMap := make(PrefixIndex)
-	providerPatterns := make(map[string][]*regexp.Regexp)
+func BuildDetectionIndex(configs []ProviderConfig) *DetectorIndex {
+	idx := &DetectorIndex{
+		prefixMap:        make(PrefixIndex),
+		providerPatterns: make(map[string][]*regexp.Regexp),
+		trie:             NewPrefixTrie(),
+	}
 
 	for _, cfg := range configs {
 		var providerRes []*regexp.Regexp
@@ -203,29 +307,31 @@ func BuildDetectionIndex(configs []ProviderConfig) ([]PrefixEntry, []PatternEntr
 				pterm.Warning.Printf("Invalid regex pattern for provider %s: %s - %v\n", cfg.Name, p, err)
 				continue
 			}
-			patterns = append(patterns, PatternEntry{Regex: re, Provider: cfg.Name, Category: cfg.Category})
+			idx.patterns = append(idx.patterns, PatternEntry{Regex: re, Provider: cfg.Name, Category: cfg.Category})
 			providerRes = append(providerRes, re)
 		}
-		providerPatterns[cfg.Name] = providerRes
+		idx.providerPatterns[cfg.Name] = providerRes
 
 		for _, p := range cfg.KeyPrefixes {
 			if p != "" {
 				entry := PrefixEntry{Prefix: p, Provider: cfg.Name, Category: cfg.Category}
-				prefixes = append(prefixes, entry)
+				idx.prefixes = append(idx.prefixes, entry)
 				firstChar := string(p[0])
-				prefixMap[firstChar] = append(prefixMap[firstChar], entry)
+				idx.prefixMap[firstChar] = append(idx.prefixMap[firstChar], entry)
+				idx.trie.Add(&entry)
 			}
 		}
 	}
 
-	sortPrefixesByLength(prefixes)
-	sortPatternsBySpecificity(patterns)
+	idx.trie.Build()
+	sortPrefixesByLength(idx.prefixes)
+	sortPatternsBySpecificity(idx.patterns)
 
-	for _, entries := range prefixMap {
+	for _, entries := range idx.prefixMap {
 		sortPrefixesByLength(entries)
 	}
 
-	return prefixes, patterns, prefixMap, providerPatterns
+	return idx
 }
 
 func sortPrefixesByLength(entries []PrefixEntry) {
@@ -238,99 +344,6 @@ func sortPatternsBySpecificity(patterns []PatternEntry) {
 	sort.Slice(patterns, func(i, j int) bool {
 		return len(patterns[i].Regex.String()) > len(patterns[j].Regex.String())
 	})
-}
-
-func DetectProviderFromIndex(key string, prefixes []PrefixEntry, patterns []PatternEntry, manualCategory string, providerPatterns map[string][]*regexp.Regexp) string {
-	key = strings.TrimSpace(key)
-
-	if key == "" {
-		return "unknown"
-	}
-
-	type match struct {
-		provider string
-		prefix   string
-		length   int
-	}
-
-	var candidates []match
-	if len(key) > 0 {
-		for _, p := range prefixes {
-			if len(p.Prefix) > 0 && p.Prefix[0] != key[0] {
-				continue
-			}
-			if manualCategory != "" && p.Category != manualCategory {
-				continue
-			}
-			if strings.HasPrefix(key, p.Prefix) {
-				candidates = append(candidates, match{provider: p.Provider, prefix: p.Prefix, length: len(p.Prefix)})
-			}
-		}
-	}
-
-	if len(candidates) > 0 {
-		var verifiedMatches []match
-		for _, c := range candidates {
-			res, hasPatterns := providerPatterns[c.provider]
-			if !hasPatterns || len(res) == 0 {
-				verifiedMatches = append(verifiedMatches, c)
-				continue
-			}
-
-			matchedPattern := false
-			for _, re := range res {
-				if re.MatchString(key) {
-					matchedPattern = true
-					break
-				}
-			}
-			if matchedPattern {
-				verifiedMatches = append(verifiedMatches, c)
-			}
-		}
-
-		if len(verifiedMatches) == 1 {
-			return verifiedMatches[0].provider
-		}
-
-		if len(verifiedMatches) > 1 {
-			maxLen := 0
-			for _, m := range verifiedMatches {
-				if m.length > maxLen {
-					maxLen = m.length
-				}
-			}
-			var longestMatches []match
-			for _, m := range verifiedMatches {
-				if m.length == maxLen {
-					longestMatches = append(longestMatches, m)
-				}
-			}
-			if len(longestMatches) == 1 {
-				return longestMatches[0].provider
-			}
-			return "unknown"
-		}
-	}
-
-	patternProviders := make(map[string]bool)
-
-	for _, p := range patterns {
-		if manualCategory != "" && p.Category != manualCategory {
-			continue
-		}
-		if p.Regex.MatchString(key) {
-			patternProviders[p.Provider] = true
-		}
-	}
-
-	if len(patternProviders) == 1 {
-		for provider := range patternProviders {
-			return provider
-		}
-	}
-
-	return "unknown"
 }
 
 type ProviderInfo struct {
@@ -451,143 +464,208 @@ type DetectionResult struct {
 	Entropy     float64
 }
 
-func DetectProviderWithSuggestion(key string, prefixes []PrefixEntry, patterns []PatternEntry, manualCategory string, providerPatterns map[string][]*regexp.Regexp) DetectionResult {
+func DetectProviderWithSuggestion(key string, idx *DetectorIndex, manualCategory string) DetectionResult {
 	key = strings.TrimSpace(key)
-	entropy := utils.CalculateShannonEntropy(key)
-
 	if key == "" {
-		return DetectionResult{
-			Provider: "unknown",
-			Message:  "Empty key provided",
-			Entropy:  0,
+		return DetectionResult{Provider: "unknown", Message: "Empty key", Entropy: 0}
+	}
+
+	entropy := utils.CalculateShannonEntropy(key)
+	keyLower := strings.ToLower(key)
+	scores := make(map[string]int)
+
+	// 1. Structural Analysis
+	// JWT Decoding
+	if strings.HasPrefix(key, "eyJ") {
+		if payload := decodeJWT(key); payload != nil {
+			// Heuristics for common JWT-based providers
+			if iss, ok := payload["iss"].(string); ok {
+				if strings.Contains(iss, "supabase") {
+					scores["supabase"] += 300
+				} else if strings.Contains(iss, "clerk") {
+					scores["clerk"] += 300
+				} else if strings.Contains(iss, "auth0") {
+					scores["auth0"] += 300
+				}
+			}
+			// Check other common claims
+			if _, ok := payload["grafana_user"]; ok {
+				scores["grafana"] += 300
+			}
 		}
 	}
 
-	type match struct {
-		provider string
-		prefix   string
-		length   int
+	// Fingerprinting
+	isPureHex := isHex(key)
+	isUuidFormat := isUUID(key)
+
+	// 2. Prefix Scoring (Aho-Corasick Optimized)
+	trieMatches := idx.trie.Search(key)
+	for _, p := range trieMatches {
+		if manualCategory != "" && p.Category != manualCategory {
+			continue
+		}
+		// Since we matched via trie, we know it has the prefix
+		scores[p.Provider] += 100 + len(p.Prefix)*2
 	}
 
-	var candidates []match
-	if len(key) > 0 {
-		for _, p := range prefixes {
-			if len(p.Prefix) > 0 && p.Prefix[0] != key[0] {
+	// Fallback for case-insensitive prefixes not in trie (or simple search)
+	if len(trieMatches) == 0 {
+		for _, p := range idx.prefixes {
+			if p.Prefix == "" {
 				continue
 			}
 			if manualCategory != "" && p.Category != manualCategory {
 				continue
 			}
-			if strings.HasPrefix(key, p.Prefix) {
-				candidates = append(candidates, match{provider: p.Provider, prefix: p.Prefix, length: len(p.Prefix)})
+			if strings.HasPrefix(keyLower, strings.ToLower(p.Prefix)) {
+				scores[p.Provider] += 50 + len(p.Prefix)*2
 			}
 		}
 	}
 
-	if len(candidates) > 0 {
-		var verifiedMatches []match
-		for _, c := range candidates {
-			res, hasPatterns := providerPatterns[c.provider]
-			if !hasPatterns || len(res) == 0 {
-				verifiedMatches = append(verifiedMatches, c)
-				continue
-			}
-
-			matchedPattern := false
-			for _, re := range res {
-				if re.MatchString(key) {
-					matchedPattern = true
-					break
-				}
-			}
-			if matchedPattern {
-				verifiedMatches = append(verifiedMatches, c)
-			}
-		}
-
-		if len(verifiedMatches) == 1 {
-			return DetectionResult{
-				Provider: verifiedMatches[0].provider,
-				Entropy:  entropy,
-			}
-		}
-
-		if len(verifiedMatches) > 1 {
-			maxLen := 0
-			for _, m := range verifiedMatches {
-				if m.length > maxLen {
-					maxLen = m.length
-				}
-			}
-			var longestMatches []match
-			for _, m := range verifiedMatches {
-				if m.length == maxLen {
-					longestMatches = append(longestMatches, m)
-				}
-			}
-			if len(longestMatches) == 1 {
-				return DetectionResult{
-					Provider: longestMatches[0].provider,
-					Entropy:  entropy,
-				}
-			}
-
-			var providerNames []string
-			seen := make(map[string]bool)
-			for _, m := range verifiedMatches {
-				if !seen[m.provider] {
-					seen[m.provider] = true
-					providerNames = append(providerNames, m.provider)
-				}
-			}
-			suggestions := generateSuggestions(key, prefixes)
-			return DetectionResult{
-				Provider:    "unknown",
-				Suggestions: suggestions,
-				Entropy:     entropy,
-				Message:     fmt.Sprintf("Ambiguous key (Entropy: %.2f) - matches: %s. Try --deep-scan", entropy, strings.Join(providerNames, ", ")),
-			}
-		}
-	}
-
-	patternProviders := make(map[string]bool)
-
-	for _, p := range patterns {
+	// 3. Pattern Scoring
+	for _, p := range idx.patterns {
 		if manualCategory != "" && p.Category != manualCategory {
 			continue
 		}
+
 		if p.Regex.MatchString(key) {
-			patternProviders[p.Provider] = true
+			patternScore := 50
+			reStr := p.Regex.String()
+
+			// Specificity bonus: longer, more complex regexes are more likely to be correct
+			patternScore += len(reStr)
+
+			// Anchored patterns are much more reliable
+			if strings.HasPrefix(reStr, "^") && strings.HasSuffix(reStr, "$") {
+				patternScore += 30
+			}
+
+			// Character class complexity bonus
+			if strings.Contains(reStr, "[a-zA-Z0-9]") || strings.Contains(reStr, "[a-f0-9]") {
+				patternScore += 10
+			}
+
+			// Fingerprint alignment bonus
+			if isPureHex && strings.Contains(reStr, "[a-f0-9]") {
+				patternScore += 20
+			}
+			if isUuidFormat && (strings.Contains(reStr, "[a-f0-9]{8}") || strings.Contains(reStr, "0-9a-f")) {
+				patternScore += 30
+			}
+
+			// Penalty for extremely loose patterns
+			literalInfo := 0
+			inClass := false
+			for i := 0; i < len(reStr); i++ {
+				if reStr[i] == '[' {
+					inClass = true
+					continue
+				}
+				if reStr[i] == ']' {
+					inClass = false
+					continue
+				}
+				if !inClass && !strings.ContainsAny(string(reStr[i]), "^$.*+?{}()|\\") {
+					literalInfo++
+				}
+			}
+			if literalInfo < 3 {
+				patternScore -= 40
+			}
+
+			scores[p.Provider] += patternScore
 		}
 	}
 
-	if len(patternProviders) == 1 {
-		for provider := range patternProviders {
-			return DetectionResult{
-				Provider: provider,
-				Entropy:  entropy,
+	// 4. Heuristics & Weights
+	// OpenAI internal marker - extremely high confidence
+	if strings.Contains(key, "T3BlbkFJ") {
+		scores["openai"] += 250
+	}
+	// Stripe internal markers
+	if strings.Contains(keyLower, "live") && strings.Contains(keyLower, "sk_") {
+		scores["stripe"] += 60
+	}
+	// DeepSeek specific (only sk- and 32 hex chars)
+	if isPureHex && len(key) == 35 && strings.HasPrefix(key, "sk-") {
+		scores["deepseek"] += 50
+	}
+
+	// Priority weights for common/major providers to break ties
+	priorities := map[string]int{
+		"openai":      10,
+		"gemini":      9,
+		"anthropic":   9,
+		"stripe":      8,
+		"aws":         8,
+		"github":      8,
+		"google_maps": 7,
+		"deepseek":    7,
+	}
+	for p, weight := range priorities {
+		if _, exists := scores[p]; exists {
+			scores[p] += weight
+		}
+	}
+
+	// Find best match
+	bestProvider := "unknown"
+	maxScore := 0
+	var ties []string
+
+	for p, s := range scores {
+		if s > maxScore {
+			maxScore = s
+			bestProvider = p
+			ties = []string{p}
+		} else if s == maxScore && s > 0 {
+			ties = append(ties, p)
+		}
+	}
+
+	// Handle ties
+	if len(ties) > 1 {
+		// If all ties are Google services, pick one (e.g., google_maps or gemini)
+		isAllGoogle := true
+		for _, t := range ties {
+			if !strings.HasPrefix(t, "google_") && t != "gemini" && t != "youtube" {
+				isAllGoogle = false
+				break
 			}
 		}
-	}
-
-	if len(patternProviders) > 1 {
-		var providerNames []string
-		for p := range patternProviders {
-			providerNames = append(providerNames, p)
+		if isAllGoogle {
+			// Pick gemini or maps as a representative
+			for _, t := range ties {
+				if t == "gemini" {
+					return DetectionResult{Provider: t, Entropy: entropy}
+				}
+			}
+			return DetectionResult{Provider: ties[0], Entropy: entropy}
 		}
-		suggestions := generateSuggestions(key, prefixes)
+
+		// Otherwise return unknown but with suggestions
 		return DetectionResult{
 			Provider:    "unknown",
-			Suggestions: suggestions,
+			Suggestions: ties,
 			Entropy:     entropy,
-			Message:     fmt.Sprintf("Ambiguous key (Entropy: %.2f) - matches: %s. Try --deep-scan", entropy, strings.Join(providerNames, ", ")),
+			Message:     fmt.Sprintf("Ambiguous key (Score: %d) - matches: %s", maxScore, strings.Join(ties, ", ")),
 		}
 	}
 
-	suggestions := generateSuggestions(key, prefixes)
+	if bestProvider != "unknown" {
+		return DetectionResult{
+			Provider: bestProvider,
+			Entropy:  entropy,
+		}
+	}
+
+	// Last resort: suggestions
+	suggestions := generateSuggestions(key, idx.prefixes)
 	msg := "Could not auto-detect provider"
 	if entropy > 3.5 {
-		msg = fmt.Sprintf("Unknown high-entropy key (%.2f). Use --deep-scan to brute-force likely providers.", entropy)
+		msg = fmt.Sprintf("Unknown high-entropy key (%.2f)", entropy)
 	}
 	return DetectionResult{
 		Provider:    "unknown",

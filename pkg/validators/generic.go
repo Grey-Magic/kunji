@@ -13,21 +13,30 @@ import (
 	"sync"
 	"time"
 
+	"bytes"
 	"github.com/Grey-Magic/kunji/pkg/client"
 	"github.com/Grey-Magic/kunji/pkg/models"
 	"github.com/Grey-Magic/kunji/pkg/utils"
 )
 
+var bufferPool = sync.Pool{
+	New: func() interface{} {
+		return new(bytes.Buffer)
+	},
+}
+
+const graphqlIntrospectionQuery = `{"query": "{ __schema { queryType { name } mutationType { name } subscriptionType { name } types { name kind } directives { name } } }"}`
+
 type GenericValidator struct {
-	config            ProviderConfig
-	client            *http.Client
-	limiter           *client.RateLimiterManager
-	cache             *client.ValidationCache
-	bodyBytes         []byte
-	skipMetadata      bool
-	checkCanary       bool
-	compiledCanaryRe  []*regexp.Regexp
-	canaryCompiled    bool
+	config           ProviderConfig
+	client           *http.Client
+	limiter          *client.RateLimiterManager
+	cache            *client.ValidationCache
+	bodyBytes        []byte
+	skipMetadata     bool
+	checkCanary      bool
+	compiledCanaryRe []*regexp.Regexp
+	canaryCompiled   bool
 }
 
 func NewGenericValidatorWithClient(cfg ProviderConfig, httpClient *http.Client, limiter *client.RateLimiterManager) *GenericValidator {
@@ -94,17 +103,40 @@ func (v *GenericValidator) compileCanaryPatterns() {
 }
 
 func (v *GenericValidator) isCanaryToken(key string) bool {
-	if !v.checkCanary || len(v.config.CanaryPatterns) == 0 {
+	if !v.checkCanary {
 		return false
 	}
 
-	v.compileCanaryPatterns()
+	// 1. confirmed canary markers (Very specific to avoid false positives)
+	globalCanaries := []string{
+		"xoxb-canary-",
+		"xoxp-canary-",
+		"canarytokens.org",
+		"thinkst.com",
+	}
 
-	for _, re := range v.compiledCanaryRe {
-		if re.MatchString(key) {
+	for _, p := range globalCanaries {
+		if strings.Contains(key, p) {
 			return true
 		}
 	}
+
+	// 2. Provider-specific canary patterns from YAML
+	if len(v.config.CanaryPatterns) > 0 {
+		v.compileCanaryPatterns()
+		for _, re := range v.compiledCanaryRe {
+			if re.MatchString(key) {
+				return true
+			}
+		}
+	}
+
+	// 3. High-entropy trap detection (increased threshold)
+	// Only flag if extremely long and extremely high entropy, typical of "entropy traps"
+	if len(key) > 128 && utils.CalculateShannonEntropy(key) > 6.0 {
+		return true
+	}
+
 	return false
 }
 
@@ -230,12 +262,17 @@ func (v *GenericValidator) Validate(ctx context.Context, apiKey string) (*models
 
 		resultChan := make(chan resultPair, len(endpoints))
 		var wg sync.WaitGroup
+		probeCtx, cancel := context.WithCancel(ctx)
+		defer cancel()
 
 		for _, ep := range endpoints {
 			wg.Add(1)
 			go func(endpoint endpointInfo) {
 				defer wg.Done()
-				r, e := v.validateWithEndpoint(ctx, apiKey, cfg, endpoint)
+				r, e := v.validateWithEndpoint(probeCtx, apiKey, cfg, endpoint)
+				if r != nil && r.IsValid {
+					cancel()
+				}
 				resultChan <- resultPair{result: r, err: e}
 			}(ep)
 		}
@@ -247,6 +284,7 @@ func (v *GenericValidator) Validate(ctx context.Context, apiKey string) (*models
 
 		var validResult *models.ValidationResult
 		var firstErr error
+		var lastFailedResult *models.ValidationResult
 
 		for rp := range resultChan {
 			if rp.err != nil && firstErr == nil {
@@ -255,6 +293,10 @@ func (v *GenericValidator) Validate(ctx context.Context, apiKey string) (*models
 			if rp.result != nil {
 				if rp.result.IsValid && validResult == nil {
 					validResult = rp.result
+				} else if !rp.result.IsValid {
+					if lastFailedResult == nil || rp.result.StatusCode > 0 {
+						lastFailedResult = rp.result
+					}
 				}
 			}
 		}
@@ -263,6 +305,8 @@ func (v *GenericValidator) Validate(ctx context.Context, apiKey string) (*models
 			result = validResult
 		} else if firstErr != nil {
 			resultErr = firstErr
+		} else if lastFailedResult != nil {
+			result = lastFailedResult
 		}
 	}
 
@@ -342,41 +386,49 @@ func (v *GenericValidator) validateWithEndpoint(ctx context.Context, apiKey stri
 
 	url := strings.ReplaceAll(ep.url, "{{key}}", apiKey)
 
-	bodyStr := string(v.bodyBytes)
-	bodyStr = strings.ReplaceAll(bodyStr, "{{key}}", apiKey)
-
-	if strings.Contains(apiKey, ":") {
-		parts := strings.SplitN(apiKey, ":", 2)
-		url = strings.ReplaceAll(url, "{{key.client_id}}", parts[0])
-		url = strings.ReplaceAll(url, "{{key.secret}}", parts[1])
-
-		bodyStr = strings.ReplaceAll(bodyStr, "{{key.client_id}}", parts[0])
-		bodyStr = strings.ReplaceAll(bodyStr, "{{key.secret}}", parts[1])
-	}
-
+	method := cfg.Method
 	var bodyReader io.Reader
-	if len(bodyStr) > 0 {
-		bodyReader = strings.NewReader(bodyStr)
+	isGraphQL := strings.ToUpper(method) == "GRAPHQL"
+
+	if isGraphQL {
+		method = "POST"
+		bodyReader = strings.NewReader(graphqlIntrospectionQuery)
+	} else {
+		bodyStr := string(v.bodyBytes)
+		bodyStr = strings.ReplaceAll(bodyStr, "{{key}}", apiKey)
+
+		if strings.Contains(apiKey, ":") {
+			parts := strings.SplitN(apiKey, ":", 2)
+			url = strings.ReplaceAll(url, "{{key.client_id}}", parts[0])
+			url = strings.ReplaceAll(url, "{{key.secret}}", parts[1])
+
+			bodyStr = strings.ReplaceAll(bodyStr, "{{key.client_id}}", parts[0])
+			bodyStr = strings.ReplaceAll(bodyStr, "{{key.secret}}", parts[1])
+		}
+
+		if len(bodyStr) > 0 {
+			bodyReader = strings.NewReader(bodyStr)
+		}
 	}
 
 	if err := utils.ValidateURL(url); err != nil {
 		return nil, fmt.Errorf("security error: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, cfg.Method, url, bodyReader)
+	req, err := http.NewRequestWithContext(ctx, method, url, bodyReader)
 	if err != nil {
 		return nil, err
 	}
 
 	v.applyAuth(req, cfg.Auth, apiKey)
 
-	if len(v.bodyBytes) > 0 {
+	if isGraphQL || len(v.bodyBytes) > 0 {
 		req.Header.Set("Content-Type", "application/json")
 	}
 	for k, val := range ep.headers {
 		req.Header.Set(k, val)
 	}
-	req.Header.Set("User-Agent", client.GetRandomUserAgent())
+	client.ApplyEvasionHeaders(req)
 
 	resp, err := v.client.Do(req)
 	duration := time.Since(start).Seconds()
@@ -404,11 +456,24 @@ func (v *GenericValidator) validateWithEndpoint(ctx context.Context, apiKey stri
 
 	result.StatusCode = resp.StatusCode
 	result.RetryAfter = utils.ParseRetryAfter(resp.Header)
-	bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+
+	buf := bufferPool.Get().(*bytes.Buffer)
+	buf.Reset()
+	defer bufferPool.Put(buf)
+
+	_, err = io.Copy(buf, io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
 		result.IsValid = false
 		result.ErrorMessage = fmt.Sprintf("Failed to read response body: %v", err)
 		return result, nil
+	}
+	bodyBytes := buf.Bytes()
+
+	// Store the response body (truncated if necessary)
+	if len(bodyBytes) > 1000 {
+		result.ResponseBody = string(bodyBytes[:1000]) + "..."
+	} else {
+		result.ResponseBody = string(bodyBytes)
 	}
 
 	switch {
@@ -417,6 +482,9 @@ func (v *GenericValidator) validateWithEndpoint(ctx context.Context, apiKey stri
 			break
 		}
 		result.IsValid = true
+		if isGraphQL {
+			v.extractGraphQLMetadata(bodyBytes, result)
+		}
 		v.extractValidationMetadata(bodyBytes, result)
 		if !v.skipMetadata {
 			v.fetchChainMetadata(ctx, apiKey, resp, result)
@@ -482,6 +550,39 @@ func (v *GenericValidator) applyAuth(req *http.Request, auth string, apiKey stri
 		q.Set(paramName, apiKey)
 		req.URL.RawQuery = q.Encode()
 	}
+}
+
+func (v *GenericValidator) extractGraphQLMetadata(bodyBytes []byte, result *models.ValidationResult) {
+	data := gjson.GetBytes(bodyBytes, "data.__schema")
+	if !data.Exists() {
+		return
+	}
+
+	var info []string
+	if q := data.Get("queryType.name"); q.Exists() {
+		info = append(info, "Queries: "+q.String())
+	}
+	if m := data.Get("mutationType.name"); m.Exists() {
+		info = append(info, "Mutations: "+m.String())
+	}
+	if s := data.Get("subscriptionType.name"); s.Exists() {
+		info = append(info, "Subscriptions: "+s.String())
+	}
+
+	types := data.Get("types").Array()
+	objCount := 0
+	enumCount := 0
+	for _, t := range types {
+		kind := t.Get("kind").String()
+		if kind == "OBJECT" {
+			objCount++
+		} else if kind == "ENUM" {
+			enumCount++
+		}
+	}
+	info = append(info, fmt.Sprintf("Schema: %d Objects, %d Enums", objCount, enumCount))
+
+	result.GraphQLInfo = strings.Join(info, " | ")
 }
 
 func (v *GenericValidator) extractValidationMetadata(bodyBytes []byte, result *models.ValidationResult) {
@@ -660,7 +761,7 @@ func (v *GenericValidator) runMetadataBatch(ctx context.Context, batch []Metadat
 			for k, val := range s.Headers {
 				req.Header.Set(k, val)
 			}
-			req.Header.Set("User-Agent", client.GetRandomUserAgent())
+			client.ApplyEvasionHeaders(req)
 
 			resp, err := v.client.Do(req)
 			if err != nil {
@@ -668,10 +769,15 @@ func (v *GenericValidator) runMetadataBatch(ctx context.Context, batch []Metadat
 			}
 			defer resp.Body.Close()
 
-			respBytes, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+			buf := bufferPool.Get().(*bytes.Buffer)
+			buf.Reset()
+			defer bufferPool.Put(buf)
+
+			_, err = io.Copy(buf, io.LimitReader(resp.Body, 1<<20))
 			if err != nil {
 				return
 			}
+			respBytes := buf.Bytes()
 
 			if resp.StatusCode != 200 {
 				return

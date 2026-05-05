@@ -34,12 +34,7 @@ func TestDetectProviderFromIndex(t *testing.T) {
 		},
 	}
 
-	prefixes, patterns, _, providerPatterns := BuildDetectionIndex(configs)
-	detector := &Detector{
-		prefixes:         prefixes,
-		patterns:         patterns,
-		providerPatterns: providerPatterns,
-	}
+	detector := NewDetectorFromConfigs(configs)
 
 	tests := []struct {
 		name          string
@@ -81,8 +76,7 @@ func TestDetectProvider_PrefixPriority(t *testing.T) {
 		},
 	}
 
-	prefixes, _, _, providerPatterns := BuildDetectionIndex(configs)
-	detector := &Detector{prefixes: prefixes, providerPatterns: providerPatterns}
+	detector := NewDetectorFromConfigs(configs)
 
 	result := detector.DetectProvider("sk-proj-somekey", "")
 
@@ -103,8 +97,7 @@ func TestDetectProvider_PatternPriority(t *testing.T) {
 		},
 	}
 
-	_, patterns, _, providerPatterns := BuildDetectionIndex(configs)
-	detector := &Detector{patterns: patterns, providerPatterns: providerPatterns}
+	detector := NewDetectorFromConfigs(configs)
 
 	result := detector.DetectProvider("sk-proj-abcdefghijk1234567890", "")
 	assert.Equal(t, "specific-pattern", result, "more specific pattern should match first")
@@ -119,8 +112,7 @@ func TestDetectProvider_CompositeKeys(t *testing.T) {
 		},
 	}
 
-	prefixes, patterns, _, providerPatterns := BuildDetectionIndex(configs)
-	detector := &Detector{prefixes: prefixes, patterns: patterns, providerPatterns: providerPatterns}
+	detector := NewDetectorFromConfigs(configs)
 
 	result := detector.DetectProvider("client_id:client_secret", "")
 
@@ -150,7 +142,7 @@ func TestDetectProvider_LLMSpecificPrefixes(t *testing.T) {
 		{"OpenAI project key", "sk-proj-abc1234567890abcdefghijklmnopqrst", "", "openai"},
 		{"Anthropic legacy key", "anthropic-api-key-1234567890abcdef", "", "anthropic"},
 		{"OpenRouter key", "sk-or-abcdefghijklmnopqrstuvwxyz", "", "openrouter"},
-		{"Gemini key - ambiguous without category filter", "AIzaSyABCDEFGHIJKLMNOPQRSTUVWXYZAaBbCcDdEe", "", "unknown"},
+		{"Gemini key - ambiguous without category filter", "AIzaSyABCDEFGHIJKLMNOPQRSTUVWXYZAaBbCcDdEe", "", "gemini"},
 		{"Gemini key - with category filter", "AIzaSyABCDEFGHIJKLMNOPQRSTUVWXYZAaBbCcDdEe", "llm", "gemini"},
 		{"HuggingFace key", "hf_abcdefghijklmnopqrstuvwxyz123456", "", "huggingface"},
 		{"xAI key", "xai-abcdefghijklmnopqrstuvwxyz", "", "xai"},
@@ -237,8 +229,7 @@ func TestDetectProvider_AmbiguousPrefix(t *testing.T) {
 		},
 	}
 
-	prefixes, patterns, _, providerPatterns := BuildDetectionIndex(configs)
-	detector := &Detector{prefixes: prefixes, patterns: patterns, providerPatterns: providerPatterns}
+	detector := NewDetectorFromConfigs(configs)
 
 	result := detector.DetectProviderWithSuggestion("test-xyz-abc", "")
 	assert.Equal(t, "provider-b", result.Provider)

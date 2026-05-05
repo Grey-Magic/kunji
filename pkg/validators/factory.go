@@ -29,7 +29,7 @@ func NewValidatorFactory(proxy string, timeout int) (*ValidatorFactory, []Provid
 		return nil, nil, nil, fmt.Errorf("creating shared HTTP client: %w", err)
 	}
 
-	sharedLimiter := client.NewRateLimiterManager(10, 10)
+	sharedLimiter := client.NewRateLimiterManager(50, 50)
 	sharedCache := client.NewValidationCache(5*time.Minute, 50000)
 
 	configMap := make(map[string]ProviderConfig)
@@ -76,6 +76,10 @@ func (f *ValidatorFactory) GetValidator(name string) (Validator, bool) {
 
 func (f *ValidatorFactory) Cache() *client.ValidationCache {
 	return f.sharedCache
+}
+
+func (f *ValidatorFactory) SharedClient() *http.Client {
+	return f.sharedClient
 }
 
 func InitValidatorsWithConfigs(proxy string, timeout int) (map[string]Validator, []ProviderConfig, *client.ProxyRotator, error) {

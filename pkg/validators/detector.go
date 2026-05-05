@@ -1,26 +1,18 @@
 package validators
 
 import (
-	"regexp"
 	"strings"
 
 	"github.com/pterm/pterm"
 )
 
 type Detector struct {
-	prefixes         []PrefixEntry
-	patterns         []PatternEntry
-	prefixMap        PrefixIndex
-	providerPatterns map[string][]*regexp.Regexp
+	index *DetectorIndex
 }
 
 func NewDetectorFromConfigs(configs []ProviderConfig) *Detector {
-	prefixes, patterns, prefixMap, providerPatterns := BuildDetectionIndex(configs)
 	return &Detector{
-		prefixes:         prefixes,
-		patterns:         patterns,
-		prefixMap:        prefixMap,
-		providerPatterns: providerPatterns,
+		index: BuildDetectionIndex(configs),
 	}
 }
 
@@ -34,9 +26,15 @@ func NewDetector() *Detector {
 }
 
 func (d *Detector) DetectProvider(apiKey string, manualCategory string) string {
-	return DetectProviderFromIndex(strings.TrimSpace(apiKey), d.prefixes, d.patterns, manualCategory, d.providerPatterns)
+	res := d.DetectProviderWithSuggestion(apiKey, manualCategory)
+	return res.Provider
+}
+
+func (d *Detector) DetectProviderBytes(apiKey []byte, manualCategory string) string {
+	res := d.DetectProviderWithSuggestion(string(apiKey), manualCategory)
+	return res.Provider
 }
 
 func (d *Detector) DetectProviderWithSuggestion(apiKey string, manualCategory string) DetectionResult {
-	return DetectProviderWithSuggestion(strings.TrimSpace(apiKey), d.prefixes, d.patterns, manualCategory, d.providerPatterns)
+	return DetectProviderWithSuggestion(strings.TrimSpace(apiKey), d.index, manualCategory)
 }

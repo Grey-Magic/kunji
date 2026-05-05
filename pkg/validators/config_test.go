@@ -58,7 +58,9 @@ func TestBuildDetectionIndex(t *testing.T) {
 		},
 	}
 
-	prefixes, patterns, _, _ := BuildDetectionIndex(configs)
+	index := BuildDetectionIndex(configs)
+	prefixes := index.prefixes
+	patterns := index.patterns
 
 	assert.Greater(t, len(prefixes), 0, "should have prefix entries")
 	assert.Greater(t, len(patterns), 0, "should have pattern entries")
@@ -83,7 +85,9 @@ func TestBuildDetectionIndex_InvalidRegex(t *testing.T) {
 		},
 	}
 
-	prefixes, patterns, _, _ := BuildDetectionIndex(configs)
+	index := BuildDetectionIndex(configs)
+	prefixes := index.prefixes
+	patterns := index.patterns
 
 	assert.Empty(t, prefixes)
 	assert.Len(t, patterns, 1, "should skip invalid regex and keep valid one")
