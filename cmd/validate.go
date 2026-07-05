@@ -5,38 +5,66 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/Grey-Magic/kunji/pkg/runner"
+	"github.com/Grey-Magic/kunji/pkg/sink"
+	"github.com/Grey-Magic/kunji/pkg/source"
 	"github.com/Grey-Magic/kunji/pkg/validators"
 	"github.com/pterm/pterm"
 	"github.com/spf13/cobra"
 )
 
 var (
-	singleKey    string
-	keysFile     string
-	outputFile   string
-	provider     string
-	category     string
-	threads      int
-	proxy        string
-	retries      int
-	timeout      int
-	resume       bool
-	list         bool
-	onlyValid    bool
-	minBalance   float64
-	templatesDir string
-	skipMetadata bool
-	canaryCheck  bool
-	dryRun       bool
-	bench        bool
-	password     string
-	deepScan     bool
-	quiet        bool
-	format       string
+	singleKey           string
+	keysFile            string
+	outputFile          string
+	provider            string
+	category            string
+	threads             int
+	proxy               string
+	retries             int
+	timeout             int
+	resume              bool
+	list                bool
+	onlyValid           bool
+	minBalance          float64
+	templatesDir        string
+	skipMetadata        bool
+	canaryCheck         bool
+	dryRun              bool
+	bench               bool
+	password            string
+	deepScan            bool
+	quiet               bool
+	format              string
+	globalRPS           int
+	webhookURL          string
+	webhookOn           string
+	webhookPlatform     string
+	webhookHeaders      []string
+	webhookParams       []string
+	webhookHeadersMap   map[string]string
+	webhookRetries      int
+	webhookBackoffMs    int
+	webhookMaxBackoffMs int
+	webhookSecret       string
+	webhookSigPrefix    string
+	telegramChatID      string
+	pagerDutyRoutingKey string
+	ntfyTopic           string
+	gotifyPriority      int
+	pushoverUserKey     string
+	pushoverAppToken    string
+	sinkDir             string
+	sourceKind          string
+	sourceArgs          []string
+	noCache             bool
+	cacheFile           string
+	cacheTTLSecs        int
 )
 
 var validateCmd = &cobra.Command{
@@ -94,7 +122,11 @@ var validateCmd = &cobra.Command{
 			os.Exit(1)
 		}
 
-		runr, err := runner.NewRunner(threads, proxy, retries, timeout, outputFile, provider, category, resume, onlyValid, minBalance, skipMetadata, canaryCheck)
+		runr, err := runner.NewRunnerWithOptions(threads, proxy, retries, timeout, outputFile, provider, category, resume, onlyValid, minBalance, skipMetadata, canaryCheck, validators.FactoryOptions{
+			PersistentCachePath: cacheFile,
+			PersistentCacheTTL:  time.Duration(cacheTTLSecs) * time.Second,
+			DisableCache:        noCache,
+		})
 		if err != nil {
 			pterm.Error.Printfln("Error initializing runner: %v", err)
 			return
@@ -104,6 +136,41 @@ var validateCmd = &cobra.Command{
 		runr.Bench = bench
 		runr.Quiet = quiet
 		runr.Format = format
+		runr.NoCache = noCache
+		if format == "jsonl" {
+			runr.Quiet = true
+		}
+		if globalRPS > 0 {
+			runr.Factory.SharedLimiter().SetGlobalLimit(globalRPS)
+		}
+
+		params, paramErrs := parseParamList(webhookParams)
+		if len(paramErrs) > 0 {
+			pterm.Error.Printfln("%v", paramErrs[0])
+			os.Exit(1)
+		}
+		if err := configureSinks(runr, sinkConfig{
+			webhookHeaders:      parseHeaderList(webhookHeaders),
+			webhookParams:       params,
+			webhookURL:          webhookURL,
+			webhookOn:           webhookOn,
+			webhookPlatform:     webhookPlatform,
+			webhookRetries:      webhookRetries,
+			webhookBackoffMs:    webhookBackoffMs,
+			webhookMaxBackoffMs: webhookMaxBackoffMs,
+			webhookSecret:       webhookSecret,
+			webhookSigPrefix:    webhookSigPrefix,
+			telegramChatID:      telegramChatID,
+			pagerDutyRoutingKey: pagerDutyRoutingKey,
+			ntfyTopic:           ntfyTopic,
+			gotifyPriority:      gotifyPriority,
+			pushoverUserKey:     pushoverUserKey,
+			pushoverAppToken:    pushoverAppToken,
+			sinkDir:             sinkDir,
+		}); err != nil {
+			pterm.Error.Printfln("Sink configuration failed: %v", err)
+			os.Exit(1)
+		}
 
 		if !quiet {
 			runr.PreflightProxyCheck()
@@ -150,6 +217,17 @@ var validateCmd = &cobra.Command{
 		}
 
 		if count == 1 {
+		}
+
+		if sourceKind != "" {
+			src, err := source.Default.Open(sourceKind, sourceArgs)
+			if err != nil {
+				pterm.Error.Printfln("Source open failed: %v", err)
+				os.Exit(1)
+			}
+			defer src.Close()
+			runr.RunSource(context.Background(), src)
+			return
 		}
 
 		runr.Run(stream, count)
@@ -242,7 +320,13 @@ func init() {
 	validateCmd.Flags().StringVar(&password, "password", "", "Password to encrypt output files or decrypt resume files")
 	validateCmd.Flags().BoolVar(&bench, "bench", false, "Run 3 consecutive tests per key to measure average latency")
 	validateCmd.Flags().BoolVar(&quiet, "quiet", false, "Suppress banner, progress bar, and summary table")
-	validateCmd.Flags().StringVar(&format, "format", "text", "Output format: text or json")
+	validateCmd.Flags().StringVar(&format, "format", "text", "Output format: text, json, or jsonl (newline-delimited JSON envelope events)")
+	validateCmd.Flags().IntVar(&globalRPS, "global-rps", 0, "Cap aggregate outbound requests per second across all providers (0 = disabled)")
+
+	defaultCacheFile := defaultPersistentCachePath()
+	validateCmd.Flags().BoolVar(&noCache, "no-cache", false, "Skip both positive and negative caches; force network revalidation of every key")
+	validateCmd.Flags().StringVar(&cacheFile, "cache-file", defaultCacheFile, "Path to the persistent positive cache (JSONL). Empty disables persistence; default is ~/.kunji/pos_cache.jsonl")
+	validateCmd.Flags().IntVar(&cacheTTLSecs, "cache-ttl", 300, "Positive-cache freshness window in seconds (default 300 = 5 minutes)")
 
 	validateCmd.RegisterFlagCompletionFunc("provider", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 		providers, err := validators.GetAllProviders()
@@ -277,4 +361,174 @@ func init() {
 		sort.Strings(names)
 		return names, cobra.ShellCompDirectiveNoFileComp
 	})
+
+	validateCmd.Flags().StringVar(&webhookURL, "webhook", "", "POST each result to this URL. Use {provider} in the URL to route per-provider (e.g. https://hooks.example/{provider})")
+	validateCmd.Flags().StringVar(&webhookOn, "webhook-on", "all", "Filter for --webhook: all, valid, or invalid")
+	validateCmd.Flags().StringVar(&webhookPlatform, "webhook-platform", "raw", "Webhook platform: raw, slack, discord, teams, telegram, pagerduty, ntfy, gotify, pushover")
+	validateCmd.Flags().StringArrayVar(&webhookHeaders, "webhook-header", nil, "Custom HTTP header 'Key: Value' (repeatable)")
+	validateCmd.Flags().StringArrayVar(&webhookParams, "webhook-param", nil, "Platform-specific webhook parameter 'key=value' (repeatable). Recognized keys: chat_id, routing_key, topic, priority, user_key, app_token. Replaces --webhook-telegram-chat-id, --webhook-pagerduty-routing-key, --webhook-ntfy-topic, --webhook-gotify-priority, --webhook-pushover-user-key, --webhook-pushover-app-token.")
+	validateCmd.Flags().IntVar(&webhookRetries, "webhook-retries", 3, "Number of retries on transient HTTP failures (5xx, 429)")
+	validateCmd.Flags().IntVar(&webhookBackoffMs, "webhook-backoff-ms", 500, "Initial backoff between retries in milliseconds (doubles each attempt)")
+	validateCmd.Flags().IntVar(&webhookMaxBackoffMs, "webhook-max-backoff-ms", 10000, "Max backoff between retries in milliseconds")
+	validateCmd.Flags().StringVar(&webhookSecret, "webhook-secret", "", "HMAC-SHA256 signing secret; emits X-Kunji-Signature: <prefix><hex>")
+	validateCmd.Flags().StringVar(&webhookSigPrefix, "webhook-sig-prefix", "", "Prefix for the HMAC signature header value (e.g. 'sha256=')")
+
+	// Per-platform flags below are hidden but still accepted for backward
+	// compatibility with scripts that used the 1.1.0 release. Prefer
+	// --webhook-param key=value instead.
+	validateCmd.Flags().StringVar(&telegramChatID, "webhook-telegram-chat-id", "", "Deprecated: use --webhook-param chat_id=<id>")
+	_ = validateCmd.Flags().MarkHidden("webhook-telegram-chat-id")
+	validateCmd.Flags().StringVar(&pagerDutyRoutingKey, "webhook-pagerduty-routing-key", "", "Deprecated: use --webhook-param routing_key=<key>")
+	_ = validateCmd.Flags().MarkHidden("webhook-pagerduty-routing-key")
+	validateCmd.Flags().StringVar(&ntfyTopic, "webhook-ntfy-topic", "", "Deprecated: use --webhook-param topic=<name>")
+	_ = validateCmd.Flags().MarkHidden("webhook-ntfy-topic")
+	validateCmd.Flags().IntVar(&gotifyPriority, "webhook-gotify-priority", 0, "Deprecated: use --webhook-param priority=<0..10>")
+	_ = validateCmd.Flags().MarkHidden("webhook-gotify-priority")
+	validateCmd.Flags().StringVar(&pushoverUserKey, "webhook-pushover-user-key", "", "Deprecated: use --webhook-param user_key=<key>")
+	_ = validateCmd.Flags().MarkHidden("webhook-pushover-user-key")
+	validateCmd.Flags().StringVar(&pushoverAppToken, "webhook-pushover-app-token", "", "Deprecated: use --webhook-param app_token=<token>")
+	_ = validateCmd.Flags().MarkHidden("webhook-pushover-app-token")
+
+	validateCmd.Flags().StringVar(&sinkDir, "sink", "", "Write each result as a JSON file into this directory")
+
+	validateCmd.Flags().StringVar(&sourceKind, "source", "", "Key source plugin (file, stdin). When set, takes precedence over -k/-f.")
+	validateCmd.Flags().StringArrayVar(&sourceArgs, "source-arg", nil, "Argument to pass to the source plugin (repeatable)")
+}
+
+func parseSinkFilter(s string) (sink.Filter, error) {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "all", "":
+		return sink.FilterAll, nil
+	case "valid":
+		return sink.FilterValid, nil
+	case "invalid":
+		return sink.FilterInvalid, nil
+	}
+	return 0, fmt.Errorf("unknown filter %q (expected all, valid, or invalid)", s)
+}
+
+func configureSinks(r *runner.Runner, cfg sinkConfig) error {
+	filter, err := parseSinkFilter(cfg.webhookOn)
+	if err != nil {
+		return err
+	}
+	if cfg.webhookURL != "" {
+		platform, err := sink.ParsePlatform(cfg.webhookPlatform)
+		if err != nil {
+			return err
+		}
+		fmtOpts := sink.FormatterOptions{
+			TelegramChatID:      cfg.telegramChatID,
+			PagerDutyRoutingKey: cfg.pagerDutyRoutingKey,
+			NtfyTopic:           cfg.ntfyTopic,
+			GotifyPriority:      cfg.gotifyPriority,
+			PushoverUserKey:     cfg.pushoverUserKey,
+			PushoverAppToken:    cfg.pushoverAppToken,
+			Params:              cfg.webhookParams,
+		}
+		sinkOpts := sink.HTTPSinkOptions{
+			Headers:         cfg.webhookHeaders,
+			Retries:         cfg.webhookRetries,
+			RetryBackoff:    time.Duration(cfg.webhookBackoffMs) * time.Millisecond,
+			RetryMaxBackoff: time.Duration(cfg.webhookMaxBackoffMs) * time.Millisecond,
+			SignatureSecret: cfg.webhookSecret,
+			SignaturePrefix: cfg.webhookSigPrefix,
+			Timeout:         10 * time.Second,
+		}
+		hs, err := sink.NewHTTPSinkWithFormatter(cfg.webhookURL, filter, platform, fmtOpts, sinkOpts)
+		if err != nil {
+			return err
+		}
+		r.Sinks = append(r.Sinks, hs)
+	}
+	if cfg.sinkDir != "" {
+		fs, err := sink.NewFileSink(cfg.sinkDir, filter)
+		if err != nil {
+			return err
+		}
+		r.Sinks = append(r.Sinks, fs)
+	}
+	return nil
+}
+
+// sinkConfig carries the CLI options consumed by configureSinks. Defined as
+// a struct so adding new sink options does not break the function signature.
+type sinkConfig struct {
+	webhookURL          string
+	webhookOn           string
+	webhookPlatform     string
+	webhookHeaders      map[string]string
+	webhookParams       map[string]string
+	webhookRetries      int
+	webhookBackoffMs    int
+	webhookMaxBackoffMs int
+	webhookSecret       string
+	webhookSigPrefix    string
+	telegramChatID      string
+	pagerDutyRoutingKey string
+	ntfyTopic           string
+	gotifyPriority      int
+	pushoverUserKey     string
+	pushoverAppToken    string
+	sinkDir             string
+}
+
+// defaultPersistentCachePath returns the default location for the cross-run
+// positive cache (~/.kunji/pos_cache.jsonl). Falls back to the current
+// directory if the home directory cannot be resolved.
+func defaultPersistentCachePath() string {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return filepath.Join(".kunji", "pos_cache.jsonl")
+	}
+	return filepath.Join(home, ".kunji", "pos_cache.jsonl")
+}
+
+// parseHeaderList converts ["Authorization: Bearer xyz", "X-Tenant: acme"]
+// into a map[string]string. Malformed entries are skipped (logged via pterm
+// debug would be nicer but we keep it quiet to avoid noisy bulk runs).
+func parseHeaderList(entries []string) map[string]string {
+	if len(entries) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(entries))
+	for _, e := range entries {
+		idx := strings.Index(e, ":")
+		if idx <= 0 {
+			continue
+		}
+		key := strings.TrimSpace(e[:idx])
+		val := strings.TrimSpace(e[idx+1:])
+		if key == "" {
+			continue
+		}
+		out[key] = val
+	}
+	return out
+}
+
+// parseParamList converts ["chat_id=12345", "user_key=abc"] into a map and
+// returns a slice of errors for malformed entries. Empty input returns
+// (nil, nil). Whitespace is trimmed from keys and values.
+func parseParamList(entries []string) (map[string]string, []error) {
+	if len(entries) == 0 {
+		return nil, nil
+	}
+	out := make(map[string]string, len(entries))
+	var errs []error
+	for _, e := range entries {
+		idx := strings.Index(e, "=")
+		if idx <= 0 {
+			errs = append(errs, fmt.Errorf("--webhook-param %q: expected key=value", e))
+			continue
+		}
+		key := strings.TrimSpace(e[:idx])
+		val := strings.TrimSpace(e[idx+1:])
+		if key == "" {
+			errs = append(errs, fmt.Errorf("--webhook-param %q: empty key", e))
+			continue
+		}
+		out[key] = val
+	}
+	return out, errs
 }
