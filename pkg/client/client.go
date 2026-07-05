@@ -199,10 +199,11 @@ type providerState struct {
 }
 
 type RateLimiterManager struct {
-	states   map[string]*providerState
-	mux      sync.RWMutex
-	defaultR rate.Limit
-	defaultB int
+	states    map[string]*providerState
+	mux       sync.RWMutex
+	defaultR  rate.Limit
+	defaultB  int
+	globalLim *rate.Limiter
 }
 
 func NewRateLimiterManager(r rate.Limit, b int) *RateLimiterManager {
@@ -214,6 +215,16 @@ func NewRateLimiterManager(r rate.Limit, b int) *RateLimiterManager {
 }
 
 func (rm *RateLimiterManager) Wait(ctx context.Context, provider string) error {
+	// Global ceiling: every request must acquire a token from the shared
+	// global bucket before the per-provider bucket is consulted. The global
+	// limiter is opt-in; if SetGlobalLimit has not been called, this Wait
+	// returns immediately.
+	if rm.globalLim != nil {
+		if err := rm.globalLim.Wait(ctx); err != nil {
+			return err
+		}
+	}
+
 	rm.mux.RLock()
 	state, exists := rm.states[provider]
 	rm.mux.RUnlock()
@@ -245,7 +256,27 @@ func (rm *RateLimiterManager) Wait(ctx context.Context, provider string) error {
 	return state.limiter.Wait(ctx)
 }
 
+// SetGlobalLimit installs a single shared token bucket that caps aggregate
+// outbound requests across all providers. rps=0 disables the global ceiling.
+func (rm *RateLimiterManager) SetGlobalLimit(rps int) {
+	rm.mux.Lock()
+	defer rm.mux.Unlock()
+	if rps <= 0 {
+		rm.globalLim = nil
+		return
+	}
+	rm.globalLim = rate.NewLimiter(rate.Limit(rps), rps)
+}
+
 func (rm *RateLimiterManager) ReportResult(provider string, statusCode int) {
+	rm.ReportResultWithRetry(provider, statusCode, 0)
+}
+
+// ReportResultWithRetry behaves like ReportResult but, when the server returns
+// a 429 with a Retry-After hint, extends the per-provider backoff window past
+// the advertised wait time. retryAfterSecs is in seconds; 0 means "use the
+// default exponential schedule".
+func (rm *RateLimiterManager) ReportResultWithRetry(provider string, statusCode int, retryAfterSecs int) {
 	rm.mux.Lock()
 	defer rm.mux.Unlock()
 
@@ -274,6 +305,16 @@ func (rm *RateLimiterManager) ReportResult(provider string, statusCode int) {
 			state.backoffUntil = time.Now().Add(10 * time.Second)
 		default:
 			state.backoffUntil = time.Now().Add(3 * time.Second)
+		}
+
+		// Honor Retry-After by extending the backoff window if it asks for
+		// more wait than our default schedule. The advertised hint is
+		// authoritative when it is larger.
+		if retryAfterSecs > 0 {
+			suggested := time.Now().Add(time.Duration(retryAfterSecs) * time.Second)
+			if suggested.After(state.backoffUntil) {
+				state.backoffUntil = suggested
+			}
 		}
 
 		pterm.Debug.Printfln("Throttling %s: %d consecutive 429s, limit=%.2f req/s, backoff=%.0fs",

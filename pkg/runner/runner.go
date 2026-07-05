@@ -22,6 +22,8 @@ import (
 
 	"github.com/Grey-Magic/kunji/pkg/client"
 	"github.com/Grey-Magic/kunji/pkg/models"
+	"github.com/Grey-Magic/kunji/pkg/sink"
+	"github.com/Grey-Magic/kunji/pkg/source"
 	"github.com/Grey-Magic/kunji/pkg/utils"
 	"github.com/Grey-Magic/kunji/pkg/validators"
 	"github.com/pterm/pterm"
@@ -40,6 +42,7 @@ type Runner struct {
 	OnlyValid        bool
 	MinBalance       float64
 	DeepScan         bool
+	NoCache          bool
 	SkipMetadata     bool
 	CanaryCheck      bool
 	Password         string
@@ -54,10 +57,18 @@ type Runner struct {
 	negCachePath     string
 	metadataJobs     chan *models.ValidationResult
 	metadataWg       sync.WaitGroup
+	Sinks            []sink.Sink
 }
 
 func NewRunner(threads int, proxy string, retries int, timeout int, out string, manualProv string, manualCat string, resume bool, onlyValid bool, minBalance float64, skipMetadata bool, canaryCheck bool) (*Runner, error) {
-	factory, configs, rotator, err := validators.NewValidatorFactory(proxy, timeout)
+	return NewRunnerWithOptions(threads, proxy, retries, timeout, out, manualProv, manualCat, resume, onlyValid, minBalance, skipMetadata, canaryCheck, validators.FactoryOptions{})
+}
+
+// NewRunnerWithOptions is the configurable constructor. factoryOpts controls
+// the positive-cache layer (persistent on/off) and whether caching is
+// disabled entirely (--no-cache).
+func NewRunnerWithOptions(threads int, proxy string, retries int, timeout int, out string, manualProv string, manualCat string, resume bool, onlyValid bool, minBalance float64, skipMetadata bool, canaryCheck bool, factoryOpts validators.FactoryOptions) (*Runner, error) {
+	factory, configs, rotator, err := validators.NewValidatorFactoryWithOptions(proxy, timeout, factoryOpts)
 	if err != nil {
 		return nil, err
 	}
@@ -162,8 +173,54 @@ func (r *Runner) PreflightProxyCheck() {
 }
 
 func (r *Runner) Run(keyReader io.Reader, totalKeys int) {
+	r.runInternal(keyReader, totalKeys)
+}
+
+// RunSource pulls keys from a Source plugin and feeds them into the validation
+// pipeline as if they came from a single reader. The Source's Total() is used
+// when non-zero so the progress bar reflects the real key count; otherwise a
+// streaming run is launched (totalKeys=0).
+func (r *Runner) RunSource(ctx context.Context, src source.Source) {
+	pr, pw := io.Pipe()
+	go func() {
+		defer pw.Close()
+		for {
+			k, err := src.Next(ctx)
+			if err == io.EOF {
+				return
+			}
+			if err != nil {
+				_ = pw.CloseWithError(err)
+				return
+			}
+			if _, err := io.WriteString(pw, k+"\n"); err != nil {
+				_ = pw.CloseWithError(err)
+				return
+			}
+		}
+	}()
+	total := src.Total()
+	if total <= 0 {
+		// The pipeline requires totalKeys >= 1 to start the progress UI; use 1
+		// so the bar shows "validating" and the ticker drives updates.
+		total = 1
+	}
+	r.runInternal(pr, total)
+}
+
+func (r *Runner) runInternal(keyReader io.Reader, totalKeys int) {
 	if !r.Quiet && r.Format != "json" {
 		pterm.Success.Printfln("Streaming %d deduplicated and well-formatted keys...", totalKeys)
+	}
+
+	if r.Format == "jsonl" {
+		if out, err := models.NewStartEvent(&models.StartEvent{
+			Total:   totalKeys,
+			Threads: r.Threads,
+			Proxy:   r.Proxy,
+		}).Marshal(); err == nil {
+			os.Stdout.Write(out)
+		}
 	}
 
 	updateCounter := 0
@@ -241,7 +298,7 @@ func (r *Runner) Run(keyReader io.Reader, totalKeys int) {
 			}
 			uniqueKeys.Add(key)
 
-			if r.negativeCache.Test(key) {
+			if !r.NoCache && r.negativeCache != nil && r.negativeCache.Test(key) {
 				updateCounterMutex.Lock()
 				updateCounter++
 				updateCounterMutex.Unlock()
@@ -316,8 +373,35 @@ func (r *Runner) Run(keyReader io.Reader, totalKeys int) {
 	}
 
 	lastResults := make([]*models.ValidationResult, 0, 5)
-	providerStats := make(map[string]int)
+	providerStats := make(map[string]models.ProviderTotals)
 	var statsMu sync.Mutex
+
+	var lastAreaText string
+	var lastTitle string
+	lastUpdateTitle := time.Time{}
+
+	buildAreaText := func(results []*models.ValidationResult) string {
+		var areaText string
+		for i := len(results) - 1; i >= 0; i-- {
+			res := results[i]
+			var status string
+			switch {
+			case res.IsValid:
+				status = pterm.Green("✓ Valid")
+			case res.StatusCode == 429:
+				status = pterm.Yellow("⚠ Rate Limited")
+			case strings.Contains(res.ErrorMessage, "Timeout") || strings.Contains(res.ErrorMessage, "proxy"):
+				status = pterm.Magenta("⧗ Network Error")
+			case strings.Contains(res.ErrorMessage, "Canary") || strings.Contains(res.ErrorMessage, "detect"):
+				status = pterm.Gray("∅ Skipped")
+			default:
+				status = pterm.Red("✗ Invalid")
+			}
+			keyMasked := maskKey(res.Key)
+			areaText += fmt.Sprintf("  %s %-15s %s %s\n", pterm.Gray("»"), pterm.LightCyan(res.Provider), status, pterm.Gray(keyMasked))
+		}
+		return areaText
+	}
 
 	for {
 		var tickerChan <-chan time.Time
@@ -332,38 +416,45 @@ func (r *Runner) Run(keyReader io.Reader, totalKeys int) {
 				p.Add(updateCounter)
 				updateCounter = 0
 
-				// Update progress bar title with speed and ETA
 				current := p.Current
 				if current > 0 {
 					elapsed := time.Since(startTime)
 					speed := float64(current) / elapsed.Seconds()
 					remaining := totalKeys - current
 					eta := time.Duration(float64(remaining)/speed) * time.Second
-					p.UpdateTitle(fmt.Sprintf("Validating API Keys [%.2f keys/s, ETA: %s]", speed, eta.Round(time.Second)))
+					newTitle := fmt.Sprintf("Validating API Keys [%.2f keys/s, ETA: %s]", speed, eta.Round(time.Second))
+					// Throttle title rewrites to ~1s to avoid flicker from
+					// the progressbar redrawing on every tick.
+					if newTitle != lastTitle && time.Since(lastUpdateTitle) > time.Second {
+						p.UpdateTitle(newTitle)
+						lastTitle = newTitle
+						lastUpdateTitle = time.Now()
+					}
+
+					if r.Format == "jsonl" {
+						progress := &models.ProgressEvent{
+							Done:       current,
+							Total:      totalKeys,
+							Valid:      validCount,
+							SpeedKeys:  speed,
+							ETASeconds: eta.Seconds(),
+						}
+						if out, err := models.NewProgressEvent(progress).Marshal(); err == nil {
+							os.Stdout.Write(out)
+						}
+					}
 				}
 			}
 
 			if area != nil {
-				var areaText string
-				for i := len(lastResults) - 1; i >= 0; i-- {
-					res := lastResults[i]
-					var status string
-					switch {
-					case res.IsValid:
-						status = pterm.Green("✓ Valid")
-					case res.StatusCode == 429:
-						status = pterm.Yellow("⚠ Rate Limited")
-					case strings.Contains(res.ErrorMessage, "Timeout") || strings.Contains(res.ErrorMessage, "proxy"):
-						status = pterm.Magenta("⧗ Network Error")
-					case strings.Contains(res.ErrorMessage, "Canary") || strings.Contains(res.ErrorMessage, "detect"):
-						status = pterm.Gray("∅ Skipped")
-					default:
-						status = pterm.Red("✗ Invalid")
-					}
-					keyMasked := maskKey(res.Key)
-					areaText += fmt.Sprintf("  %s %-15s %s %s\n", pterm.Gray("»"), pterm.LightCyan(res.Provider), status, pterm.Gray(keyMasked))
+				areaText := buildAreaText(lastResults)
+				// Only redraw the live region when the content actually
+				// changed; this keeps the area stable between result events
+				// and eliminates the strobe/flicker against the progressbar.
+				if areaText != lastAreaText {
+					area.Update(areaText)
+					lastAreaText = areaText
 				}
-				area.Update(areaText)
 			}
 			updateCounterMutex.Unlock()
 
@@ -379,10 +470,26 @@ func (r *Runner) Run(keyReader io.Reader, totalKeys int) {
 			if res.IsValid {
 				validCount++
 				statsMu.Lock()
-				providerStats[res.Provider]++
+				totals := providerStats[res.Provider]
+				totals.Valid++
+				providerStats[res.Provider] = totals
 				statsMu.Unlock()
 			} else if res.ErrorMessage != "Probe cancelled" && !strings.Contains(res.ErrorMessage, "Could not auto-detect") {
-				r.negativeCache.Add(res.Key)
+				if !r.NoCache && r.negativeCache != nil {
+					r.negativeCache.Add(res.Key)
+				}
+				statsMu.Lock()
+				totals := providerStats[res.Provider]
+				switch {
+				case res.StatusCode == 429:
+					totals.RateLimit++
+				case strings.Contains(res.ErrorMessage, "Canary") || strings.Contains(res.ErrorMessage, "detect"):
+					totals.Skipped++
+				default:
+					totals.Invalid++
+				}
+				providerStats[res.Provider] = totals
+				statsMu.Unlock()
 			}
 
 			updateCounterMutex.Lock()
@@ -392,6 +499,16 @@ func (r *Runner) Run(keyReader io.Reader, totalKeys int) {
 			if len(lastResults) > 5 {
 				lastResults = lastResults[1:]
 			}
+
+			// Redraw the live region immediately on new results so feedback
+			// is instant, but only when the rendered text actually changes.
+			if area != nil {
+				areaText := buildAreaText(lastResults)
+				if areaText != lastAreaText {
+					area.Update(areaText)
+					lastAreaText = areaText
+				}
+			}
 			updateCounterMutex.Unlock()
 
 			shouldKeep := true
@@ -400,12 +517,25 @@ func (r *Runner) Run(keyReader io.Reader, totalKeys int) {
 			}
 
 			if shouldKeep {
+				for _, sk := range r.Sinks {
+					// Sinks run detached so a slow HTTP endpoint never stalls
+					// the result loop. Errors are intentionally swallowed here;
+					// per-sink Stats() methods expose failure counts.
+					go func(s sink.Sink) {
+						_ = s.Emit(context.Background(), res)
+					}(sk)
+				}
 				if r.Format == "json" {
 					b, _ := json.Marshal(res)
 					fmt.Println(string(b))
 					if r.OutFile != "" && r.OutFile != "stdout" {
 						allResults = append(allResults, *res)
 					}
+				} else if r.Format == "jsonl" {
+					if out, err := models.NewResultEvent(res).Marshal(); err == nil {
+						os.Stdout.Write(out)
+					}
+					allResults = append(allResults, *res)
 				} else if r.OutFile != "" {
 					if collectAllResults || r.Password != "" {
 						allResults = append(allResults, *res)
@@ -428,6 +558,9 @@ func (r *Runner) Run(keyReader io.Reader, totalKeys int) {
 	}
 
 done:
+	for _, sk := range r.Sinks {
+		_ = sk.Close()
+	}
 	if p != nil {
 		p.Stop()
 	}
@@ -452,8 +585,8 @@ done:
 		r.displayResultsTable(allResults)
 	}
 
-	// Save negative cache
-	if r.negativeCache != nil {
+	// Save negative cache unless caching is disabled
+	if !r.NoCache && r.negativeCache != nil {
 		r.negativeCache.Save(r.negCachePath)
 	}
 
@@ -484,7 +617,33 @@ done:
 		summaryTable, _ := pterm.DefaultTable.WithHasHeader().WithData(stats).Srender()
 		pterm.DefaultBox.WithTitle("Results").Println(summaryTable)
 
+		r.renderProviderBreakdown(&statsMu, providerStats, totalKeys)
 		pterm.Println()
+	}
+
+	if r.Format == "jsonl" {
+		var invalid, rateLimit, skipped int
+		statsMu.Lock()
+		byProvider := make(map[string]models.ProviderTotals, len(providerStats))
+		for prov, t := range providerStats {
+			byProvider[prov] = t
+			invalid += t.Invalid
+			rateLimit += t.RateLimit
+			skipped += t.Skipped
+		}
+		statsMu.Unlock()
+		summary := &models.SummaryEvent{
+			Total:      totalKeys,
+			Valid:      validCount,
+			Invalid:    invalid,
+			RateLimit:  rateLimit,
+			Skipped:    skipped,
+			DurationMs: time.Since(startTime).Milliseconds(),
+			ByProvider: byProvider,
+		}
+		if out, err := models.NewSummaryEvent(summary).Marshal(); err == nil {
+			os.Stdout.Write(out)
+		}
 	}
 }
 
@@ -784,6 +943,75 @@ func (r *Runner) writeResult(f *os.File, cw *csv.Writer, res *models.ValidationR
 	}
 
 	f.WriteString(line + "\n")
+}
+
+func (r *Runner) renderProviderBreakdown(mu *sync.Mutex, stats map[string]models.ProviderTotals, total int) {
+	mu.Lock()
+	defer mu.Unlock()
+	if len(stats) == 0 {
+		return
+	}
+
+	type row struct {
+		name                   string
+		valid, invalid, rl, sk int
+		total                  int
+		hitRate                float64
+	}
+	rows := make([]row, 0, len(stats))
+	for name, t := range stats {
+		tot := t.Valid + t.Invalid + t.RateLimit + t.Skipped
+		if tot == 0 {
+			continue
+		}
+		rows = append(rows, row{
+			name:    name,
+			valid:   t.Valid,
+			invalid: t.Invalid,
+			rl:      t.RateLimit,
+			sk:      t.Skipped,
+			total:   tot,
+			hitRate: float64(t.Valid) / float64(tot) * 100,
+		})
+	}
+	if len(rows) == 0 {
+		return
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].valid != rows[j].valid {
+			return rows[i].valid > rows[j].valid
+		}
+		return rows[i].name < rows[j].name
+	})
+
+	if len(rows) > 15 {
+		rows = rows[:15]
+	}
+
+	pterm.Println()
+	pterm.DefaultSection.Println("Per-Provider Breakdown")
+	tableData := pterm.TableData{
+		{pterm.LightCyan("Provider"), pterm.LightCyan("Valid"), pterm.LightCyan("Invalid"), pterm.LightCyan("Rate Ltd"), pterm.LightCyan("Skip"), pterm.LightCyan("Total"), pterm.LightCyan("Hit %")},
+	}
+	for _, r := range rows {
+		hitColor := pterm.FgGreen
+		if r.hitRate < 50 {
+			hitColor = pterm.FgYellow
+		}
+		if r.hitRate < 20 {
+			hitColor = pterm.FgRed
+		}
+		tableData = append(tableData, []string{
+			r.name,
+			pterm.Green(fmt.Sprintf("%d", r.valid)),
+			pterm.Red(fmt.Sprintf("%d", r.invalid)),
+			pterm.Yellow(fmt.Sprintf("%d", r.rl)),
+			pterm.Gray(fmt.Sprintf("%d", r.sk)),
+			fmt.Sprintf("%d", r.total),
+			pterm.NewStyle(hitColor).Sprintf("%.1f%%", r.hitRate),
+		})
+	}
+	pterm.DefaultTable.WithHasHeader().WithData(tableData).Render()
 }
 
 func (r *Runner) displayResultsTable(results []models.ValidationResult) {

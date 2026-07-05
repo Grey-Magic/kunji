@@ -31,7 +31,7 @@ type GenericValidator struct {
 	config           ProviderConfig
 	client           *http.Client
 	limiter          *client.RateLimiterManager
-	cache            *client.ValidationCache
+	cache            client.ResultCache
 	bodyBytes        []byte
 	skipMetadata     bool
 	checkCanary      bool
@@ -76,7 +76,7 @@ func (v *GenericValidator) SetCanaryCheck(check bool) {
 	v.checkCanary = check
 }
 
-func (v *GenericValidator) SetCache(cache *client.ValidationCache) {
+func (v *GenericValidator) SetCache(cache client.ResultCache) {
 	v.cache = cache
 }
 
@@ -217,6 +217,97 @@ func (v *GenericValidator) checkBodyError(bodyBytes []byte, result *models.Valid
 	}
 
 	return true
+}
+
+// gjsonPath normalizes a JSONPath-like expression to gjson's native syntax.
+// gjson expects either the top-level key directly ("status") or each level
+// separated by dots ("items.0.id"). It does NOT accept a leading "." or "$".
+// Users naturally write "$.foo.bar" in YAML, so we strip those here.
+func gjsonPath(p string) string {
+	p = strings.TrimPrefix(p, "$")
+	p = strings.TrimPrefix(p, ".")
+	if p == "" {
+		return ""
+	}
+	return p
+}
+
+func (v *GenericValidator) matchesResponseCriteria(bodyBytes []byte, headers map[string][]string, rm *ResponseMatch) bool {
+	if rm == nil {
+		return true
+	}
+	if rm.BodyRegex != "" {
+		re, err := regexp.Compile(rm.BodyRegex)
+		if err != nil || !re.Match(bodyBytes) {
+			return false
+		}
+	}
+	if rm.BodyJSONPath != "" {
+		val := gjson.GetBytes(bodyBytes, gjsonPath(rm.BodyJSONPath))
+		if !val.Exists() {
+			return false
+		}
+		if rm.JSONPathValue == "" {
+			return true
+		}
+		if val.String() == rm.JSONPathValue {
+			return true
+		}
+		return false
+	}
+	if rm.HeaderContains != "" {
+		parts := strings.SplitN(rm.HeaderContains, ":", 2)
+		if len(parts) != 2 {
+			return false
+		}
+		headerName := strings.TrimSpace(strings.ToLower(parts[0]))
+		expected := strings.TrimSpace(parts[1])
+		for h, vals := range headers {
+			if strings.ToLower(h) != headerName {
+				continue
+			}
+			for _, val := range vals {
+				if strings.Contains(val, expected) {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	return true
+}
+
+func (v *GenericValidator) matchesFailureWhen(bodyBytes []byte, fw *FailureWhen) bool {
+	if fw == nil {
+		return false
+	}
+	if fw.BodyRegex != "" {
+		if re, err := regexp.Compile(fw.BodyRegex); err == nil && re.Match(bodyBytes) {
+			return true
+		}
+	}
+	if fw.BodyJSONPath != "" {
+		val := gjson.GetBytes(bodyBytes, gjsonPath(fw.BodyJSONPath))
+		if !val.Exists() {
+			return false
+		}
+		if fw.JSONPathValue == "" {
+			return true
+		}
+		if val.String() == fw.JSONPathValue {
+			return true
+		}
+	}
+	return false
+}
+
+func (v *GenericValidator) statusInList(code int, list []int) bool {
+	for _, c := range list {
+		if c == code {
+			return true
+		}
+	}
+	return false
 }
 
 func (v *GenericValidator) Validate(ctx context.Context, apiKey string) (*models.ValidationResult, error) {
@@ -451,7 +542,7 @@ func (v *GenericValidator) validateWithEndpoint(ctx context.Context, apiKey stri
 	defer resp.Body.Close()
 
 	if v.limiter != nil {
-		v.limiter.ReportResult(v.Name(), resp.StatusCode)
+		v.limiter.ReportResultWithRetry(v.Name(), resp.StatusCode, result.RetryAfter)
 	}
 
 	result.StatusCode = resp.StatusCode
@@ -479,6 +570,18 @@ func (v *GenericValidator) validateWithEndpoint(ctx context.Context, apiKey stri
 	switch {
 	case resp.StatusCode == 200:
 		if v.checkBodyError(bodyBytes, result) {
+			break
+		}
+		if !v.matchesResponseCriteria(bodyBytes, resp.Header, v.config.Validation.ResponseMatch) {
+			result.IsValid = false
+			result.InvalidReason = "Response criteria not met"
+			result.ErrorMessage = utils.ParseAPIError(bodyBytes, apiKey)
+			break
+		}
+		if v.matchesFailureWhen(bodyBytes, v.config.Validation.FailureWhen) {
+			result.IsValid = false
+			result.InvalidReason = "Failure marker matched"
+			result.ErrorMessage = utils.ParseAPIError(bodyBytes, apiKey)
 			break
 		}
 		result.IsValid = true

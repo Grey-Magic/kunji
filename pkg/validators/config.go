@@ -87,14 +87,31 @@ type ErrorCheck struct {
 	JSONPath string `yaml:"json_path,omitempty"`
 }
 
+type ResponseMatch struct {
+	BodyRegex      string `yaml:"body_regex,omitempty"`
+	BodyJSONPath   string `yaml:"body_jsonpath,omitempty"`
+	JSONPathValue  string `yaml:"jsonpath_value,omitempty"`
+	HeaderContains string `yaml:"header_contains,omitempty"`
+}
+
+type FailureWhen struct {
+	BodyRegex     string `yaml:"body_regex,omitempty"`
+	BodyJSONPath  string `yaml:"body_jsonpath,omitempty"`
+	JSONPathValue string `yaml:"jsonpath_value,omitempty"`
+}
+
 type ValidationConfig struct {
-	Method     string            `yaml:"method"`
-	URL        string            `yaml:"url"`
-	Auth       string            `yaml:"auth"`
-	Headers    map[string]string `yaml:"headers"`
-	Body       string            `yaml:"body"`
-	Endpoints  []EndpointConfig  `yaml:"endpoints,omitempty"`
-	ErrorCheck *ErrorCheck       `yaml:"error_check,omitempty"`
+	Method         string            `yaml:"method"`
+	URL            string            `yaml:"url"`
+	Auth           string            `yaml:"auth"`
+	Headers        map[string]string `yaml:"headers"`
+	Body           string            `yaml:"body"`
+	Endpoints      []EndpointConfig  `yaml:"endpoints,omitempty"`
+	ErrorCheck     *ErrorCheck       `yaml:"error_check,omitempty"`
+	ExpectedStatus []int             `yaml:"expected_status,omitempty"`
+	ResponseMatch  *ResponseMatch    `yaml:"response_match,omitempty"`
+	RetryOnStatus  []int             `yaml:"retry_on_status,omitempty"`
+	FailureWhen    *FailureWhen      `yaml:"failure_when,omitempty"`
 }
 
 type ProviderConfig struct {

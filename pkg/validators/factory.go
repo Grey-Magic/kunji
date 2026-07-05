@@ -13,12 +13,32 @@ type ValidatorFactory struct {
 	configs       map[string]ProviderConfig
 	sharedClient  *http.Client
 	sharedLimiter *client.RateLimiterManager
-	sharedCache   *client.ValidationCache
+	sharedCache   client.ResultCache
 	validators    map[string]Validator
 	mux           sync.RWMutex
 }
 
+// FactoryOptions configures the optional layers attached to a ValidatorFactory.
+type FactoryOptions struct {
+	// PersistentCachePath enables the cross-run positive cache when non-empty.
+	// When empty, the factory uses only the in-memory ValidationCache.
+	PersistentCachePath string
+	// PersistentCacheTTL is the freshness window for persistent entries.
+	// Zero means use the default (5 minutes).
+	PersistentCacheTTL time.Duration
+	// DisableCache disables both layers; validators will always hit the
+	// network. Used when the user passes --no-cache.
+	DisableCache bool
+}
+
 func NewValidatorFactory(proxy string, timeout int) (*ValidatorFactory, []ProviderConfig, *client.ProxyRotator, error) {
+	return NewValidatorFactoryWithOptions(proxy, timeout, FactoryOptions{})
+}
+
+// NewValidatorFactoryWithOptions is the configurable constructor. opts.PersistentCachePath
+// enables a cross-run positive cache; opts.DisableCache forces every request
+// through the network regardless of either cache layer.
+func NewValidatorFactoryWithOptions(proxy string, timeout int, opts FactoryOptions) (*ValidatorFactory, []ProviderConfig, *client.ProxyRotator, error) {
 	configs, err := LoadProviderConfigs()
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("loading provider configs: %w", err)
@@ -30,7 +50,25 @@ func NewValidatorFactory(proxy string, timeout int) (*ValidatorFactory, []Provid
 	}
 
 	sharedLimiter := client.NewRateLimiterManager(50, 50)
-	sharedCache := client.NewValidationCache(5*time.Minute, 50000)
+
+	var sharedCache client.ResultCache
+	switch {
+	case opts.DisableCache:
+		sharedCache = nil
+	case opts.PersistentCachePath != "":
+		ttl := opts.PersistentCacheTTL
+		if ttl <= 0 {
+			ttl = 5 * time.Minute
+		}
+		disk, err := client.NewPersistentCache(opts.PersistentCachePath, ttl)
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("creating persistent cache: %w", err)
+		}
+		mem := client.NewValidationCache(5*time.Minute, 50000)
+		sharedCache = client.NewLayeredCache(mem, disk)
+	default:
+		sharedCache = client.NewValidationCache(5*time.Minute, 50000)
+	}
 
 	configMap := make(map[string]ProviderConfig)
 	for _, cfg := range configs {
@@ -74,12 +112,18 @@ func (f *ValidatorFactory) GetValidator(name string) (Validator, bool) {
 	return v, true
 }
 
-func (f *ValidatorFactory) Cache() *client.ValidationCache {
+func (f *ValidatorFactory) Cache() client.ResultCache {
 	return f.sharedCache
 }
 
 func (f *ValidatorFactory) SharedClient() *http.Client {
 	return f.sharedClient
+}
+
+// SharedLimiter exposes the underlying RateLimiterManager so callers can
+// install a global rate ceiling via SetGlobalLimit.
+func (f *ValidatorFactory) SharedLimiter() *client.RateLimiterManager {
+	return f.sharedLimiter
 }
 
 func InitValidatorsWithConfigs(proxy string, timeout int) (map[string]Validator, []ProviderConfig, *client.ProxyRotator, error) {
