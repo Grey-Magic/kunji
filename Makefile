@@ -1,7 +1,7 @@
-.PHONY: build run test clean install uninstall zip all
+.PHONY: build run test clean install uninstall zip completions all
 
 BINARY_NAME=kunji
-VERSION=1.0.9
+VERSION=1.1.0
 LDFLAGS=-ldflags "-s -w -X main.version=$(VERSION)"
 
 all: clean build
@@ -32,3 +32,12 @@ uninstall:
 zip: build
 	@echo "Creating release zip kunji_$(VERSION).zip..."
 	zip kunji_$(VERSION).zip $(BINARY_NAME)
+
+completions: build
+	@echo "Generating shell completions into completions/..."
+	@mkdir -p completions
+	./$(BINARY_NAME) completion bash > completions/kunji.bash
+	./$(BINARY_NAME) completion zsh > completions/_kunji
+	./$(BINARY_NAME) completion fish > completions/kunji.fish
+	./$(BINARY_NAME) completion powershell > completions/_kunji.ps1
+	@echo "Wrote completions/{kunji.bash,_kunji,kunji.fish,_kunji.ps1}"

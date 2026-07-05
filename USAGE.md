@@ -128,6 +128,178 @@ To make sure your proxies are functioning properly before starting a huge scan:
 
 ---
 
+## Advanced Features
+
+### JSONL Streaming
+
+Use `--format jsonl` for a stable newline-delimited JSON envelope. Selecting `jsonl` automatically suppresses the banner and progress bar so the output is pipe-clean and safe for `jq`, Vector, or any streaming consumer.
+
+```bash
+# Pipe valid keys straight into jq
+./kunji validate -f keys.txt --format jsonl | jq -c 'select(.event=="result" and .result.is_valid)'
+
+# Watch progress over time
+./kunji validate -f keys.txt --format jsonl | jq -c 'select(.event=="progress") | .progress'
+```
+
+Each event carries a `schema_version` field (`1.0.0`). Event types are `start`, `progress`, `result`, and `summary`. The summary event includes a `by_provider` map with per-provider valid / invalid / rate-limited / skipped counts.
+
+```json
+{"event":"start","schema_version":"1.0.0","start":{"total":1000,"threads":40}}
+{"event":"progress","schema_version":"1.0.0","progress":{"done":250,"total":1000,"valid":210,"keys_per_second":42.5,"eta_seconds":17}}
+{"event":"result","schema_version":"1.0.0","result":{"provider":"openai","is_valid":true,"status_code":200,...}}
+{"event":"summary","schema_version":"1.0.0","summary":{"total":1000,"valid":812,"invalid":175,"duration_ms":23500,"by_provider":{...}}}
+```
+
+### Global Rate Budget
+
+Cap aggregate outbound requests per second across all providers on top of the per-provider adaptive throttling.
+
+```bash
+# Never exceed 50 RPS no matter how many workers run
+./kunji validate -f keys.txt --threads 80 --global-rps 50
+
+# Turn it off (default 0 = disabled)
+./kunji validate -f keys.txt --global-rps 0
+```
+
+The global ceiling composes with the per-provider limiter: a slow provider is still throttled even if the global budget is generous.
+
+### Caches (Positive and Negative)
+
+Kunji ships with two caches. Both are on by default.
+
+- **Negative cache** (Bloom filter at `.kunji_neg_cache`): skips keys known to be invalid across sessions.
+- **Positive cache** (JSONL at `~/.kunji/pos_cache.jsonl`): skips re-validation of fresh-positive keys within the TTL window (default 5 minutes).
+
+```bash
+# Force revalidation of every key (skip both caches)
+./kunji validate -f keys.txt --no-cache
+
+# Disable just the persistent on-disk positive cache (in-memory stays)
+./kunji validate -f keys.txt --cache-file ""
+
+# Change the positive-cache freshness window (seconds)
+./kunji validate -f keys.txt --cache-ttl 60
+
+# Use a custom cache file location
+./kunji validate -f keys.txt --cache-file /var/cache/kunji.jsonl
+```
+
+Keys are SHA-256 hashed on disk; the raw key never appears in the cache file. Latest entry wins on duplicates.
+
+### Source Plugins
+
+`--source` lets you pipe keys from a plugin instead of `-k`/`-f`. Built-in plugins are `file` and `stdin`.
+
+```bash
+# Same as -f but explicit source plugin
+./kunji validate --source file --source-arg keys.txt
+
+# Read from stdin (default when -f is '-' anyway)
+cat keys.txt | ./kunji validate --source stdin
+
+# Plugins take precedence over -k/--f when both are set
+```
+
+Custom plugins can be registered from Go code:
+
+```go
+source.Default.Register("vault", func(args []string) (source.Source, error) {
+    // ...
+})
+```
+
+### Webhooks and Sinks
+
+Stream every validation result to a webhook. Built-in payload formatters exist for Slack, Discord, Microsoft Teams, Telegram, PagerDuty, ntfy, Gotify, and Pushover.
+
+```bash
+# Slack
+./kunji validate -f keys.txt --webhook https://hooks.slack.com/services/T.../B.../XXX \
+  --webhook-platform slack
+
+# Discord
+./kunji validate -f keys.txt --webhook https://discord.com/api/webhooks/XXX/YYY \
+  --webhook-platform discord
+
+# Telegram (use --webhook-param for platform-specific values)
+./kunji validate -f keys.txt --webhook https://api.telegram.org/bot<TOKEN>/sendMessage \
+  --webhook-platform telegram --webhook-param chat_id=-1001234567890
+
+# PagerDuty (triggers on invalid, acknowledges on valid)
+./kunji validate -f keys.txt --webhook https://events.pagerduty.com/v2/enqueue \
+  --webhook-platform pagerduty --webhook-param routing_key=<RK>
+
+# ntfy
+./kunji validate -f keys.txt --webhook https://ntfy.sh \
+  --webhook-platform ntfy --webhook-param topic=alerts
+
+# Pushover (two --webhook-param entries)
+./kunji validate -f keys.txt --webhook https://api.pushover.net/1/messages.json \
+  --webhook-platform pushover \
+  --webhook-param user_key=U123 --webhook-param app_token=T456
+```
+
+Add custom headers, retries with exponential backoff, and HMAC signing:
+
+```bash
+./kunji validate -f keys.txt --webhook https://intake.example.com/kunji \
+  --webhook-header "Authorization: Bearer mytoken" \
+  --webhook-retries 5 --webhook-backoff-ms 200 --webhook-max-backoff-ms 5000 \
+  --webhook-secret topsecret --webhook-sig-prefix "sha256="
+```
+
+Drop results into a directory instead of (or in addition to) the webhook:
+
+```bash
+# Write one JSON file per result into ./triage
+./kunji validate -f keys.txt --sink ./triage/
+
+# Combine with a filter: only alert Slack on valid keys, only sink invalid keys
+./kunji validate -f keys.txt \
+  --webhook https://hooks.slack.com/... --webhook-platform slack --webhook-on valid \
+  --sink ./triage/ --webhook-on invalid
+```
+
+Per-result behavior:
+
+- `--webhook-on all|valid|invalid` controls which results trigger POSTs (default `all`).
+- Webhook requests automatically retry on `5xx` and `429` with exponential backoff (`--webhook-retries`, `--webhook-backoff-ms`).
+- The body is signed with HMAC-SHA256 in `X-Kunji-Signature` when `--webhook-secret` is set.
+
+For platform-specific required values, the recognized `--webhook-param` keys are: `chat_id`, `routing_key`, `topic`, `priority`, `user_key`, `app_token`.
+
+### `kunji dedupe`
+
+Strip duplicates from a key file. Order is preserved on first occurrence; blank lines and `#` comments are skipped.
+
+```bash
+# Read from stdin, write to stdout, summary on stderr
+cat keys.txt | ./kunji dedupe > unique.txt
+
+# Or with file arguments
+./kunji dedupe -i keys.txt -o unique.txt
+```
+
+### `kunji diff`
+
+Compare two JSONL result files (produced by `--format jsonl`) without exposing secrets. Comparison is done by SHA-256 hash of the key.
+
+```bash
+# Show changed / only-in-A / only-in-B with per-key listings
+./kunji diff --a run1.jsonl --b run2.jsonl
+
+# Counts only
+./kunji diff --a run1.jsonl --b run2.jsonl --quiet
+```
+
+### Per-Provider Breakdown
+
+Every validate run ends with a table sorted by valid count, showing per-provider valid / invalid / rate-limited / skipped totals and a hit-rate percentage. Useful for spotting misconfigured providers or providers that are heavily throttled.
+
+---
+
 ## Provider Detection
 
 Kunji auto-detects providers using:
