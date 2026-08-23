@@ -20,7 +20,9 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Grey-Magic/kunji/pkg/audit"
 	"github.com/Grey-Magic/kunji/pkg/client"
+	"github.com/Grey-Magic/kunji/pkg/history"
 	"github.com/Grey-Magic/kunji/pkg/models"
 	"github.com/Grey-Magic/kunji/pkg/sink"
 	"github.com/Grey-Magic/kunji/pkg/source"
@@ -58,6 +60,32 @@ type Runner struct {
 	metadataJobs     chan *models.ValidationResult
 	metadataWg       sync.WaitGroup
 	Sinks            []sink.Sink
+
+	// FilterExprs is the parsed --filter argument. Empty means "no filter".
+	FilterExprs []FilterExpr
+	// Audit is the audit logger. nil disables audit logging.
+	Audit *audit.Logger
+	// History is the run history logger. nil disables history persistence.
+	History *history.Logger
+	// RunID is the unique identifier stamped on every history record.
+	RunID string
+	// Thresholds holds parsed --fail-if conditions. Empty disables CI mode.
+	Thresholds []Threshold
+	// Stats tracks aggregate run counters. Populated during runInternal;
+	// intended for the CI threshold evaluator.
+	Stats RunStats
+	// EmitDedupe suppresses duplicate (provider, key, is_valid) emits in the
+	// JSONL stream. The first emission wins; subsequent identical results
+	// during the same run are dropped silently.
+	EmitDedupe bool
+	// seenEmits is the dedupe key set. Lazily initialized when EmitDedupe is true.
+	seenEmits map[string]struct{}
+	seenMu    sync.Mutex
+	// Sharded enables per-provider worker pools. When true, detection happens
+	// once at the feeder and each provider gets its own small worker pool,
+	// reducing contention on the proxy rotator and per-provider rate
+	// limiter. Off by default.
+	Sharded bool
 }
 
 func NewRunner(threads int, proxy string, retries int, timeout int, out string, manualProv string, manualCat string, resume bool, onlyValid bool, minBalance float64, skipMetadata bool, canaryCheck bool) (*Runner, error) {
@@ -244,9 +272,21 @@ func (r *Runner) runInternal(keyReader io.Reader, totalKeys int) {
 		numWorkers = totalKeys
 	}
 
-	for w := 1; w <= numWorkers; w++ {
+	if r.Sharded {
+		// Sharded mode: skip the global worker pool and the jobs channel;
+		// detection moves to the feeder (runSharded) and results flow
+		// directly into `results`. We track completion in the same wg
+		// so the close-results goroutine fires when sharded drains too.
 		wg.Add(1)
-		go r.worker(jobs, results, &wg)
+		go func() {
+			defer wg.Done()
+			r.runSharded(keyReader, results)
+		}()
+	} else {
+		for w := 1; w <= numWorkers; w++ {
+			wg.Add(1)
+			go r.worker(jobs, results, &wg)
+		}
 	}
 
 	metadataThreadCount := numWorkers / 2
@@ -272,6 +312,11 @@ func (r *Runner) runInternal(keyReader io.Reader, totalKeys int) {
 
 	go func() {
 		defer closeJobs()
+
+		// In sharded mode, runSharded owns the keyReader. Skip this feeder.
+		if r.Sharded {
+			return
+		}
 
 		alreadyProcessed := utils.NewBloomFilter(10000000, 0.001)
 		if r.Resume {
@@ -467,6 +512,66 @@ func (r *Runner) runInternal(keyReader io.Reader, totalKeys int) {
 				updateCounterMutex.Unlock()
 				goto done
 			}
+
+			// Always update aggregate Stats so CI threshold checks have
+			// accurate totals even when a filter drops the result downstream.
+			statsMu.Lock()
+			r.Stats.Total++
+			if res.IsValid {
+				r.Stats.Valid++
+			} else {
+				switch {
+				case res.StatusCode == 429:
+					r.Stats.RateLimit++
+				case strings.Contains(res.ErrorMessage, "Canary") || strings.Contains(res.ErrorMessage, "detect"):
+					r.Stats.Skipped++
+				case res.StatusCode >= 500 || strings.Contains(res.ErrorMessage, "Timeout") || strings.Contains(res.ErrorMessage, "Network"):
+					r.Stats.Errored++
+				default:
+					r.Stats.Invalid++
+				}
+			}
+			statsMu.Unlock()
+
+			// Audit log: emit every result regardless of filter (audit
+			// records what we attempted, not what the user kept).
+			if r.Audit != nil {
+				_ = r.Audit.Emit(res)
+			}
+			// History log: same per-result record, tagged with the run ID
+			// so downstream `kunji history` queries can correlate keys.
+			if r.History != nil {
+				_ = r.History.Emit(res)
+			}
+
+			// Dedupe: suppress identical (provider, key, is_valid) emits
+			// from the JSONL stream and sink list. The first emission wins.
+			// We use shouldKeep=false so UI/progress still update, but
+			// file/sink/stream emission is skipped on duplicates.
+			dup := false
+			if r.EmitDedupe {
+				r.seenMu.Lock()
+				if r.seenEmits == nil {
+					r.seenEmits = make(map[string]struct{})
+				}
+				k := res.Provider + "|" + res.Key + "|" + boolStr(res.IsValid)
+				if _, exists := r.seenEmits[k]; exists {
+					dup = true
+				} else {
+					r.seenEmits[k] = struct{}{}
+				}
+				r.seenMu.Unlock()
+			}
+
+			// Filter: when --filter is set, drop results that don't match
+			// before any UI / sink / file emission happens.
+			if !Match(r.FilterExprs, res) {
+				updateCounterMutex.Lock()
+				updateCounter++
+				updateCounterMutex.Unlock()
+				continue
+			}
+
 			if res.IsValid {
 				validCount++
 				statsMu.Lock()
@@ -512,6 +617,9 @@ func (r *Runner) runInternal(keyReader io.Reader, totalKeys int) {
 			updateCounterMutex.Unlock()
 
 			shouldKeep := true
+			if dup {
+				shouldKeep = false
+			}
 			if r.OnlyValid && (!res.IsValid || res.Balance < r.MinBalance) {
 				shouldKeep = false
 			}
@@ -782,12 +890,81 @@ func (r *Runner) validateWithRetries(val validators.Validator, key, providerName
 	return r.validateWithRetriesWithContext(context.Background(), val, key, providerName)
 }
 
+// retryBudget derives the effective retry behavior for this provider. A
+// non-nil RetryPolicy in the provider config overrides the global defaults.
+type retryBudget struct {
+	maxAttempts    int
+	onStatus       map[int]bool
+	initialBackoff time.Duration
+	maxBackoff     time.Duration
+}
+
+func (r *Runner) retryBudget(val validators.Validator) retryBudget {
+	b := retryBudget{
+		maxAttempts:    r.Retries + 1,
+		onStatus:       defaultRetryOnStatus(),
+		initialBackoff: 1 * time.Second,
+		maxBackoff:     8 * time.Second,
+	}
+	if gv, ok := val.(*validators.GenericValidator); ok && gv.Config().RetryPolicy != nil {
+		rp := gv.Config().RetryPolicy
+		if rp.MaxAttempts >= 1 {
+			b.maxAttempts = rp.MaxAttempts
+		}
+		if len(rp.OnStatus) > 0 {
+			b.onStatus = make(map[int]bool, len(rp.OnStatus))
+			for _, s := range rp.OnStatus {
+				b.onStatus[s] = true
+			}
+		}
+		if rp.InitialBackoffMs > 0 {
+			b.initialBackoff = time.Duration(rp.InitialBackoffMs) * time.Millisecond
+		}
+		if rp.MaxBackoffMs > 0 {
+			b.maxBackoff = time.Duration(rp.MaxBackoffMs) * time.Millisecond
+		}
+	}
+	return b
+}
+
+// defaultRetryOnStatus returns the conservative retry set: 429 plus any 5xx.
+func defaultRetryOnStatus() map[int]bool {
+	m := make(map[int]bool, 7)
+	m[429] = true
+	for c := 500; c < 600; c++ {
+		m[c] = true
+	}
+	return m
+}
+
+// backoffDuration returns the wait before retrying after the given attempt.
+// Schedule doubles each attempt up to maxBackoff; matches the historical
+// 1<<attempt seconds behavior when no per-provider override is set.
+func (b retryBudget) backoffDuration(attempt int, retryAfterSec int) time.Duration {
+	// Retry-After replaces the schedule-derived duration, but is capped at
+	// maxBackoff to prevent a hostile or buggy server from forcing us to
+	// sleep for hours.
+	if retryAfterSec > 0 {
+		d := time.Duration(retryAfterSec) * time.Second
+		if d > b.maxBackoff {
+			d = b.maxBackoff
+		}
+		return d
+	}
+	d := b.initialBackoff << attempt
+	if d > b.maxBackoff {
+		d = b.maxBackoff
+	}
+	return d
+}
+
 func (r *Runner) validateWithRetriesWithContext(parentCtx context.Context, val validators.Validator, key, providerName string) *models.ValidationResult {
 	var finalRes *models.ValidationResult
-	ctx, cancel := context.WithTimeout(parentCtx, time.Duration(r.Timeout)*time.Second*time.Duration(r.Retries+1))
+	budget := r.retryBudget(val)
+	ctx, cancel := context.WithTimeout(parentCtx, time.Duration(r.Timeout)*time.Second*time.Duration(budget.maxAttempts))
 	defer cancel()
 
-	for attempt := 0; attempt <= r.Retries; attempt++ {
+	for attempt := 0; attempt < budget.maxAttempts; attempt++ {
 		select {
 		case <-parentCtx.Done():
 			return &models.ValidationResult{Key: key, Provider: providerName, IsValid: false, ErrorMessage: "Probe cancelled"}
@@ -797,29 +974,23 @@ func (r *Runner) validateWithRetriesWithContext(parentCtx context.Context, val v
 		res, err := val.Validate(ctx, key)
 
 		if err != nil {
-			if r.ProxyRotator != nil {
-			}
 			errStr := err.Error()
 			if strings.Contains(errStr, "timeout") {
 				errStr = "Request Timeout"
 			}
 
-			if attempt == r.Retries {
+			if attempt == budget.maxAttempts-1 {
 				finalRes = &models.ValidationResult{
 					Key: key, Provider: providerName, IsValid: false, ErrorMessage: errStr,
 				}
 				break
 			}
-			time.Sleep(r.addJitter(time.Duration(1<<attempt) * time.Second))
+			time.Sleep(r.addJitter(budget.backoffDuration(attempt, 0)))
 			continue
 		}
 
-		if res.StatusCode == 429 && attempt < r.Retries {
-			backoff := 2
-			if res.RetryAfter > 0 {
-				backoff = res.RetryAfter
-			}
-			time.Sleep(r.addJitter(time.Duration(backoff) * time.Second))
+		if budget.onStatus[res.StatusCode] && attempt < budget.maxAttempts-1 {
+			time.Sleep(r.addJitter(budget.backoffDuration(attempt, res.RetryAfter)))
 			continue
 		}
 
@@ -1515,4 +1686,11 @@ func (r *Runner) addJitter(d time.Duration) time.Duration {
 	}
 	jitter, _ := rand.Int(rand.Reader, big.NewInt(maxJitterMs))
 	return d + time.Duration(jitter.Int64())*time.Millisecond
+}
+
+func boolStr(b bool) string {
+	if b {
+		return "1"
+	}
+	return "0"
 }

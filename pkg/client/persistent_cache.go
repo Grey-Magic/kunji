@@ -2,9 +2,13 @@ package client
 
 import (
 	"bufio"
+	"bytes"
+	"compress/gzip"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"sync"
@@ -12,6 +16,10 @@ import (
 
 	"github.com/Grey-Magic/kunji/pkg/models"
 )
+
+// compressMarker is the byte that prefixes every compressed cache line.
+// Lines without this marker are treated as plain JSON (legacy format).
+const compressMarker byte = 'Z'
 
 // PersistentCache is a file-backed positive validation cache.
 //
@@ -94,22 +102,98 @@ func (c *PersistentCache) load() error {
 		if len(line) == 0 {
 			continue
 		}
-		var e persistentCacheEntry
-		if err := json.Unmarshal(line, &e); err != nil {
+		entry, err := decodeCacheLine(line)
+		if err != nil {
 			// Skip malformed lines; they may belong to an older schema.
 			continue
 		}
 		// Discard expired entries on load so the in-memory map stays small.
-		if !e.ExpiresAt.IsZero() && now.After(e.ExpiresAt) {
+		if !entry.ExpiresAt.IsZero() && now.After(entry.ExpiresAt) {
 			continue
 		}
 		// Latest entry for a key wins (later appends override earlier ones).
-		if existing, ok := c.entries[e.Key]; !ok || e.Observed.After(existing.Observed) {
-			c.entries[e.Key] = e
+		if existing, ok := c.entries[entry.Key]; !ok || entry.Observed.After(existing.Observed) {
+			c.entries[entry.Key] = entry
 		}
 	}
 	return scanner.Err()
 }
+
+// decodeCacheLine handles both legacy plain-JSON lines and new gzip+base64
+// compressed lines (prefixed with compressMarker).
+func decodeCacheLine(line []byte) (persistentCacheEntry, error) {
+	var rawJSON []byte
+
+	if len(line) > 0 && line[0] == compressMarker {
+		raw, err := base64.StdEncoding.DecodeString(string(line[1:]))
+		if err != nil {
+			return persistentCacheEntry{}, err
+		}
+		gz, err := gzip.NewReader(bytes.NewReader(raw))
+		if err != nil {
+			return persistentCacheEntry{}, err
+		}
+		defer gz.Close()
+		rawJSON, err = io.ReadAll(gz)
+		if err != nil {
+			return persistentCacheEntry{}, err
+		}
+	} else {
+		rawJSON = line
+	}
+
+	var e persistentCacheEntry
+	if err := json.Unmarshal(rawJSON, &e); err != nil {
+		return persistentCacheEntry{}, err
+	}
+	return e, nil
+}
+
+// encodeCacheLine returns the on-disk form of one entry. When compression is
+// enabled the result is "Z<base64(gzip(json))>"; otherwise it is the JSON
+// bytes themselves.
+func encodeCacheLine(e persistentCacheEntry) ([]byte, error) {
+	raw, err := json.Marshal(e)
+	if err != nil {
+		return nil, err
+	}
+	if !compressionEnabled {
+		out := make([]byte, 0, len(raw)+1)
+		out = append(out, raw...)
+		out = append(out, '\n')
+		return out, nil
+	}
+
+	var buf bytes.Buffer
+	buf.WriteByte(compressMarker)
+
+	gz := gzip.NewWriter(&buf)
+	if _, err := gz.Write(raw); err != nil {
+		return nil, err
+	}
+	if err := gz.Close(); err != nil {
+		return nil, err
+	}
+
+	encoded := base64.StdEncoding.EncodeToString(buf.Bytes()[1:])
+	out := make([]byte, 0, len(encoded)+2)
+	out = append(out, compressMarker)
+	out = append(out, []byte(encoded)...)
+	out = append(out, '\n')
+	return out, nil
+}
+
+// compressionEnabled is the package-wide default. Toggle at startup via
+// SetCompressionEnabled. Off by default to keep legacy caches readable as-is;
+// new writes always produce compressed entries when this is true.
+var compressionEnabled = false
+
+// SetCompressionEnabled flips whether appendEntry produces compressed lines.
+// Existing plain lines remain valid; load handles both formats transparently.
+func SetCompressionEnabled(on bool) { compressionEnabled = on }
+
+// CompressionEnabled reports the current default.
+func CompressionEnabled() bool { return compressionEnabled }
 
 // Get returns a cached result if present and still fresh.
 func (c *PersistentCache) Get(provider, apiKey string) (*models.ValidationResult, bool) {
@@ -141,18 +225,27 @@ func (c *PersistentCache) Get(provider, apiKey string) (*models.ValidationResult
 	return &r, true
 }
 
-// Set records a fresh positive result. Errors writing to disk are returned but
-// the in-memory entry is still updated — the next save() call will retry.
+// Set records a fresh positive result with the cache's default TTL.
 func (c *PersistentCache) Set(provider, apiKey string, result *models.ValidationResult) {
+	c.SetWithTTL(provider, apiKey, result, c.ttl)
+}
+
+// SetWithTTL records a fresh positive result with a per-call TTL override.
+// ttl <= 0 falls back to the cache's default. Validators use this to honor
+// per-provider cache_ttl_seconds declared in their YAML schema.
+func (c *PersistentCache) SetWithTTL(provider, apiKey string, result *models.ValidationResult, ttl time.Duration) {
 	if c.disabled || result == nil {
 		return
+	}
+	if ttl <= 0 {
+		ttl = c.ttl
 	}
 	key := CacheKey(provider, apiKey)
 	now := time.Now()
 	e := persistentCacheEntry{
 		Key:       key,
 		Observed:  now,
-		ExpiresAt: now.Add(c.ttl),
+		ExpiresAt: now.Add(ttl),
 		Result:    result,
 	}
 
@@ -173,11 +266,10 @@ func (c *PersistentCache) appendEntry(e persistentCacheEntry) error {
 		return err
 	}
 	defer f.Close()
-	b, err := json.Marshal(e)
+	b, err := encodeCacheLine(e)
 	if err != nil {
 		return err
 	}
-	b = append(b, '\n')
 	_, err = f.Write(b)
 	return err
 }
@@ -234,16 +326,22 @@ func (l *LayeredCache) Get(provider, apiKey string) (*models.ValidationResult, b
 	return nil, false
 }
 
-// Set writes through to both layers.
+// Set writes through to both layers with the cache's default TTL.
 func (l *LayeredCache) Set(provider, apiKey string, result *models.ValidationResult) {
+	l.SetWithTTL(provider, apiKey, result, 0)
+}
+
+// SetWithTTL writes through to both layers with a per-call TTL override.
+// ttl <= 0 means "use each layer's default".
+func (l *LayeredCache) SetWithTTL(provider, apiKey string, result *models.ValidationResult, ttl time.Duration) {
 	if l == nil || result == nil {
 		return
 	}
 	if l.mem != nil {
-		l.mem.Set(provider, apiKey, result)
+		l.mem.SetWithTTL(provider, apiKey, result, ttl)
 	}
 	if l.disk != nil {
-		l.disk.Set(provider, apiKey, result)
+		l.disk.SetWithTTL(provider, apiKey, result, ttl)
 	}
 }
 
@@ -267,6 +365,7 @@ func (l *LayeredCache) Stats() (mh, mm, dh, dm int64) {
 type ResultCache interface {
 	Get(provider, apiKey string) (*models.ValidationResult, bool)
 	Set(provider, apiKey string, result *models.ValidationResult)
+	SetWithTTL(provider, apiKey string, result *models.ValidationResult, ttl time.Duration)
 }
 
 // Compile-time checks.

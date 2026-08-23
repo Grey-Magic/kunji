@@ -124,7 +124,38 @@ type ProviderConfig struct {
 	Validation             ValidationConfig        `yaml:"validation"`
 	Metadata               []MetadataConfig        `yaml:"metadata,omitempty"`
 	MetadataFromValidation *MetadataFromValidation `yaml:"metadata_from_validation,omitempty"`
-	IsCustom               bool                    `yaml:"-"`
+	// Detection tunes how aggressively this provider matches unknown keys.
+	// MinScore, when > 0, requires the detector to score at least this high
+	// before reporting this provider as a match.
+	Detection *DetectionConfig `yaml:"detection,omitempty"`
+	// CacheTTLSeconds overrides the global positive-cache TTL for entries
+	// produced by this provider. Zero means "use the global default".
+	CacheTTLSeconds int `yaml:"cache_ttl_seconds,omitempty"`
+	// RetryPolicy overrides the global retry budget. MaxAttempts is total
+	// tries (1 = no retries). Backoff is exponential with cap.
+	RetryPolicy *RetryPolicy `yaml:"retry_policy,omitempty"`
+	// RegionalEndpoints lists alternative validation URLs to race against
+	// the primary validation.url. The first 200 wins and the endpoint that
+	// succeeded is recorded on the result.
+	RegionalEndpoints []EndpointConfig `yaml:"regional_endpoints,omitempty"`
+	IsCustom          bool             `yaml:"-"`
+}
+
+// DetectionConfig carries per-provider detection tuning.
+type DetectionConfig struct {
+	// MinScore is the minimum total detection score for this provider to be
+	// considered a match. The default detector scoring produces scores well
+	// over 100 for a confident match; values in the 50-150 range are typical
+	// tuning points.
+	MinScore int `yaml:"min_score,omitempty"`
+}
+
+// RetryPolicy is the per-provider retry behavior.
+type RetryPolicy struct {
+	MaxAttempts      int   `yaml:"max_attempts"`
+	OnStatus         []int `yaml:"on_status,omitempty"`
+	InitialBackoffMs int   `yaml:"initial_backoff_ms,omitempty"`
+	MaxBackoffMs     int   `yaml:"max_backoff_ms,omitempty"`
 }
 
 var (
@@ -184,6 +215,23 @@ func LoadProviderConfigs() ([]ProviderConfig, error) {
 		return nil, configsCacheError
 	}
 	return configsCache, nil
+}
+
+// LoadProviderFile reads and parses one provider YAML file. The file may
+// contain a single provider or a YAML list of providers.
+func LoadProviderFile(path string) ([]ProviderConfig, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	var cfgs []ProviderConfig
+	if err := yaml.Unmarshal(data, &cfgs); err != nil {
+		return nil, fmt.Errorf("parsing %s: %w", path, err)
+	}
+	for i := range cfgs {
+		cfgs[i].IsCustom = true
+	}
+	return cfgs, nil
 }
 
 func importCustomProviderConfigs(allConfigs *[]ProviderConfig, dir string) {
@@ -307,6 +355,7 @@ type DetectorIndex struct {
 	prefixMap        PrefixIndex
 	providerPatterns map[string][]*regexp.Regexp
 	trie             *PrefixTrie
+	minScoreByName   map[string]int // provider name -> MinScore (0 means no threshold)
 }
 
 func BuildDetectionIndex(configs []ProviderConfig) *DetectorIndex {
@@ -314,6 +363,7 @@ func BuildDetectionIndex(configs []ProviderConfig) *DetectorIndex {
 		prefixMap:        make(PrefixIndex),
 		providerPatterns: make(map[string][]*regexp.Regexp),
 		trie:             NewPrefixTrie(),
+		minScoreByName:   make(map[string]int, len(configs)),
 	}
 
 	for _, cfg := range configs {
@@ -337,6 +387,10 @@ func BuildDetectionIndex(configs []ProviderConfig) *DetectorIndex {
 				idx.prefixMap[firstChar] = append(idx.prefixMap[firstChar], entry)
 				idx.trie.Add(&entry)
 			}
+		}
+
+		if cfg.Detection != nil && cfg.Detection.MinScore > 0 {
+			idx.minScoreByName[cfg.Name] = cfg.Detection.MinScore
 		}
 	}
 
@@ -479,6 +533,9 @@ type DetectionResult struct {
 	Suggestions []string
 	Message     string
 	Entropy     float64
+	// Score is the detection confidence score for the chosen provider. Higher
+	// is more confident; providers without an entry get a default of 0.
+	Score int
 }
 
 func DetectProviderWithSuggestion(key string, idx *DetectorIndex, manualCategory string) DetectionResult {
@@ -627,6 +684,17 @@ func DetectProviderWithSuggestion(key string, idx *DetectorIndex, manualCategory
 		}
 	}
 
+	// Apply per-provider min_score thresholds. Providers configured with a
+	// detection.min_score are dropped from candidacy if their total score is
+	// below that threshold, even if they have nonzero matches.
+	if idx != nil && len(idx.minScoreByName) > 0 {
+		for name, threshold := range idx.minScoreByName {
+			if scores[name] < threshold {
+				delete(scores, name)
+			}
+		}
+	}
+
 	// Find best match
 	bestProvider := "unknown"
 	maxScore := 0
@@ -656,10 +724,10 @@ func DetectProviderWithSuggestion(key string, idx *DetectorIndex, manualCategory
 			// Pick gemini or maps as a representative
 			for _, t := range ties {
 				if t == "gemini" {
-					return DetectionResult{Provider: t, Entropy: entropy}
+					return DetectionResult{Provider: t, Entropy: entropy, Score: maxScore}
 				}
 			}
-			return DetectionResult{Provider: ties[0], Entropy: entropy}
+			return DetectionResult{Provider: ties[0], Entropy: entropy, Score: maxScore}
 		}
 
 		// Otherwise return unknown but with suggestions
@@ -667,6 +735,7 @@ func DetectProviderWithSuggestion(key string, idx *DetectorIndex, manualCategory
 			Provider:    "unknown",
 			Suggestions: ties,
 			Entropy:     entropy,
+			Score:       maxScore,
 			Message:     fmt.Sprintf("Ambiguous key (Score: %d) - matches: %s", maxScore, strings.Join(ties, ", ")),
 		}
 	}
@@ -675,6 +744,7 @@ func DetectProviderWithSuggestion(key string, idx *DetectorIndex, manualCategory
 		return DetectionResult{
 			Provider: bestProvider,
 			Entropy:  entropy,
+			Score:    maxScore,
 		}
 	}
 
@@ -688,6 +758,7 @@ func DetectProviderWithSuggestion(key string, idx *DetectorIndex, manualCategory
 		Provider:    "unknown",
 		Suggestions: suggestions,
 		Entropy:     entropy,
+		Score:       maxScore,
 		Message:     msg,
 	}
 }

@@ -78,6 +78,14 @@ If you have your own YAML provider definitions:
 ./kunji validate -f keys.txt --custom-providers ./my-definitions/
 ```
 
+You can also drop them into `~/.kunji/providers/` (one YAML per provider, multiple providers per file is fine) and they will be loaded automatically.
+
+Always validate a new template before using it:
+
+```bash
+kunji lint-providers --path ./my-definitions/
+```
+
 ### Deep Scan
 
 When key detection is ambiguous, probe across all potential providers:
@@ -297,6 +305,271 @@ Compare two JSONL result files (produced by `--format jsonl`) without exposing s
 ### Per-Provider Breakdown
 
 Every validate run ends with a table sorted by valid count, showing per-provider valid / invalid / rate-limited / skipped totals and a hit-rate percentage. Useful for spotting misconfigured providers or providers that are heavily throttled.
+
+### Configuration and Profiles
+
+Long flags repeated across runs become friction. `~/.kunji/config.yaml` lets you define named profiles that bundle flags together; `kunji` then resolves each flag from the highest-priority source:
+
+1. CLI flag passed on the command line.
+2. `KUNJI_<FLAG>` environment variable (e.g. `KUNJI_THREADS=80`).
+3. The active profile's value for that flag.
+4. The flag's built-in default.
+
+The active profile is selected by `--profile <name>`, then `KUNJI_PROFILE`, then the `default_profile` field at the top of the config file.
+
+```bash
+# Show the resolved profile before running
+kunji --profile prod validate -f keys.txt --dry-run
+```
+
+The flag name in YAML is the long form with dashes intact (`global-rps`, `webhook-retries`, `cache-ttl`). For `--webhook-on` and `--fail-if`, use YAML lists:
+
+```yaml
+# ~/.kunji/config.yaml
+default_profile: prod
+
+profiles:
+  prod:
+    threads: 80
+    proxy: socks5://localhost:9050
+    format: jsonl
+    only-valid: true
+    global-rps: 40
+    fail-if:
+      - "invalid > 5%"
+      - "valid >= 50"
+
+  paranoid:
+    threads: 4
+    only-valid: true
+    no-cache: true
+
+  ci:
+    format: jsonl
+    fail-if: ["invalid > 0"]
+```
+
+The `--config <path>` flag overrides the config file location; `KUNJI_CONFIG` does the same via env var.
+
+### Linting Custom Provider YAML
+
+Before pointing `--templates` at a directory, validate the schema with `kunji lint-providers`:
+
+```bash
+kunji lint-providers --path ./my-templates/
+kunji lint-providers --path ./my-templates/ --json   # for CI
+```
+
+The linter reports every error and warning with the provider name and the offending field. Exit code is non-zero on errors so this can run in CI as a guard against shipping broken templates:
+
+| Check | Severity |
+|---|---|
+| Missing `name` | error |
+| Neither `key_prefixes` nor `key_patterns` set | error |
+| Invalid regex in `key_patterns`, `canary_patterns`, `regex_extract` | error |
+| Unknown HTTP method (only `GET`, `POST`, `PUT`, `DELETE`, `PATCH`, `GRAPHQL` accepted) | error |
+| Unknown auth scheme (only `none`, `bearer`, `basic`, `basic_composite`, `header:<name>`, `query:<name>` accepted) | error |
+| `validation.url` missing AND no `validation.endpoints[]` | error |
+| URL with non-http(s) scheme or no host | error |
+| Unknown `syntax_check` value (only `base64` accepted) | error |
+| Duplicate provider name across configs | error |
+| Negative `cache_ttl_seconds` / `detection.min_score` | error |
+| `retry_policy.max_attempts < 1` | error |
+| `initial_backoff_ms > max_backoff_ms` | warning |
+| Missing `category` | warning |
+
+### Pre-Output Filter
+
+`--filter` drops results before they reach sinks, JSONL output, file sinks, or the summary table. Audit and history still record the unfiltered run.
+
+```bash
+# Only fire the webhook for OpenAI / Stripe / Anthropic
+kunji validate -f keys.txt \
+  --filter "provider=openai,stripe,anthropic" \
+  --webhook https://intake.example.com/kunji
+
+# Only output valid keys (alternative to --only-valid, but composable)
+kunji validate -f keys.txt --filter "is_valid=true" -o valid.csv
+
+# Combined conditions are AND-ed
+kunji validate -f keys.txt \
+  --filter "provider=openai" \
+  --filter "is_valid=true" \
+  -o openai-valid.jsonl
+
+# Negative match
+kunji validate -f keys.txt --filter "provider!=github"
+```
+
+Supported fields: `provider`, `is_valid` (`true`/`false`/`1`/`0`/`yes`/`no`), `status_code`, `error_code`, `key`. Operators: `=` and `!=`. Values for `provider`, `error_code`, and `status_code` accept comma-separated lists (any-of).
+
+### Result Deduplication
+
+When a key is retried across the cache + network + retry chain, `--dedupe-emit` ensures the JSONL stream and sinks see each `(provider, key, is_valid)` triple exactly once. The first emission wins; subsequent identical results during the same run are dropped (the UI and progress counter still account for them).
+
+```bash
+# Cleaner downstream pipelines — no need to dedupe in jq
+kunji validate -f keys.txt --dedupe-emit --format jsonl | \
+  jq -c 'select(.event=="result")'
+```
+
+### Per-Provider Cache TTL
+
+Most providers use the global 5-minute cache window, but some tokens rotate much faster. Declare `cache_ttl_seconds` per provider in YAML and the value overrides the global TTL for that provider only:
+
+```yaml
+- name: cloudflare
+  cache_ttl_seconds: 3600    # CF tokens rotate hourly; keep cached for an hour
+
+- name: short-lived
+  cache_ttl_seconds: 30      # 30-second freshness
+```
+
+### Per-Provider Retry Policy
+
+Some endpoints should never be retried (Stripe charges twice on retry). Others want aggressive retries (Cloudflare drops transient connections). Set `retry_policy` in provider YAML to override the global `--retries`:
+
+```yaml
+- name: stripe
+  retry_policy:
+    max_attempts: 1          # no retries; we have one shot per charge
+    on_status: []            # (none — single attempt only)
+
+- name: cloudflare
+  retry_policy:
+    max_attempts: 5
+    on_status: [429, 502, 503, 504]
+    initial_backoff_ms: 200
+    max_backoff_ms: 5000
+```
+
+`max_attempts` is the total number of tries (1 = no retries). `on_status` defaults to `[429, 5xx]` when omitted. `initial_backoff_ms` and `max_backoff_ms` default to the global schedule.
+
+### Per-Provider Detection Threshold
+
+Some provider patterns are looser than they should be. `detection.min_score` lets the provider author declare "if my total detection score isn't at least this high, drop me as a candidate":
+
+```yaml
+- name: noisy-provider
+  key_prefixes: ["zz-"]
+  key_patterns: ["^zz-.+$"]   # very loose; would match anything starting with zz-
+  detection:
+    min_score: 500            # require high confidence before claiming a match
+```
+
+### Region-Aware Endpoint Racing
+
+For providers with regional endpoints (AWS, Cloudflare, GCP, etc.), declare `regional_endpoints[]` and Kunji races them in parallel alongside the primary URL. The first 2xx response wins and the winning region's label is stamped on `result.extra.region`:
+
+```yaml
+- name: aws
+  validation:
+    method: POST
+    url: "https://sts.amazonaws.com/"
+    auth: bearer
+  regional_endpoints:
+    - url: "https://sts.us-east-1.amazonaws.com/"
+      region: us-east-1
+    - url: "https://sts.eu-west-1.amazonaws.com/"
+      region: eu-west-1
+    - url: "https://sts.ap-southeast-1.amazonaws.com/"
+      region: ap-southeast-1
+```
+
+The primary `validation.url` always races alongside the regional ones.
+
+### OpenAPI / Swagger Introspection
+
+When a successful response body has the shape of an OpenAPI 3.x or Swagger 2.x document, Kunji extracts a few useful fields onto `result.extra`:
+
+- `openapi_version` — e.g. `3.0.3` or `2.0`
+- `openapi_title` — `info.title`
+- `openapi_paths` — count of operation entries (`paths.<p>.{get,post,...}`)
+- `openapi_schemas` — count of schemas under `components.schemas` (OpenAPI 3) or `definitions` (Swagger 2)
+
+This is automatic and free — no flag to set.
+
+### Sharded Worker Pools
+
+For inputs that mix many providers, the global worker pool contends on the proxy rotator and per-provider rate limiter mutexes. `--sharded` gives each provider its own small worker pool (4 workers each), with detection happening once at the feeder:
+
+```bash
+kunji validate -f mixed-keys.txt --sharded --threads 80
+```
+
+Trade-off: slightly higher per-key latency for higher aggregate throughput on large mixed-provider inputs. The downstream result pipeline (sinks, JSONL, filter, audit, history) is unchanged.
+
+### Audit Log
+
+Every validation result — including dropped ones — is appended to `~/.kunji/audit.jsonl`. Each line is a single JSON record:
+
+```json
+{"ts":"2026-...","provider":"openai","key_sha256":"...","is_valid":true,"status_code":200,"duration_ms":123}
+```
+
+Notes:
+
+- Only the SHA-256 hash of the key is stored, never the raw secret.
+- Records are appended, never overwritten.
+- `--no-audit` disables the writer for a single run.
+- `--audit-file <path>` overrides the location; empty string disables persistence.
+
+```bash
+# Forward audit records to a SIEM
+kunji validate -f keys.txt --audit-file /var/log/kunji/audit.jsonl
+
+# Disable for a one-off dry run
+kunji validate -f keys.txt --dry-run --no-audit
+```
+
+### Cross-Run History
+
+`~/.kunji/history.jsonl` records per-key validations tagged with a unique `run_id`. Inspect it with `kunji history`:
+
+```bash
+# Summary view: one row per distinct key, newest-first
+kunji history
+
+# Top 20 by recency
+kunji history --limit 20
+
+# Full timeline for a single key (SHA-256 prefix match)
+kunji history --key 5fa3a8c1b7e2d...
+```
+
+The summary shows the latest observation, the current valid-streak length (consecutive valid runs ending now), and the `valid/total` ratio. The timeline view prints every recorded run for that key with timestamp, run ID, validity, HTTP status, and latency.
+
+Disable per-run with `--no-history`; override the file with `--history-file <path>`.
+
+### CI Thresholds (`--fail-if`)
+
+`--fail-if` accepts one or more `metric op value[%]` clauses. The run exits with code `2` if any clause is violated; the normal `0` (success) and `1` (infra error) semantics are preserved.
+
+```bash
+# Fail the build if more than 5% of keys are invalid
+kunji validate -f keys.txt --fail-if "invalid > 5%"
+
+# Multiple conditions: ANY violation fails
+kunji validate -f keys.txt \
+  --fail-if "invalid > 5%" \
+  --fail-if "valid < 10" \
+  --fail-if "error > 1%"
+
+# Absolute counts (no % suffix)
+kunji validate -f keys.txt --fail-if "valid >= 100"
+```
+
+Supported metrics: `valid`, `invalid`, `error`, `rate_limit`, `skipped`, `total`. Operators: `>`, `>=`, `<`, `<=`, `==`, `!=`. The metric name `error` accepts the synonyms `errors`; `rate_limit` accepts `rate-limit` and `ratelimited`.
+
+### HTTP/3 (QUIC)
+
+`--http3` requests HTTP/3 (QUIC) for outbound requests. The QUIC client depends on `github.com/quic-go/quic-go`; until that dependency is vendored the flag silently falls back to HTTP/2 and prints an info line.
+
+```bash
+kunji validate -f keys.txt --http3
+```
+
+Useful for endpoints behind Cloudflare or Akamai that rate-limit HTTP/2 specifically.
 
 ---
 
@@ -1645,6 +1918,102 @@ Limit detection to specific categories:
 # Encrypt results with a password
 ./kunji validate -f keys.txt -o results.json --password "my-secret"
 ```
+
+---
+
+## Custom Provider Schema Extensions
+
+A provider YAML describes one or more providers. Every provider has the same top-level shape; the sections below are optional unless noted.
+
+```yaml
+- name: my-provider                 # required, unique
+  category: llm                      # category for filtering / --category
+  key_prefixes: ["mp-"]              # at least one of key_prefixes / key_patterns
+  key_patterns: ["^mp-[a-z0-9]{20,}$"]
+  syntax_check: base64               # optional, "base64" supported
+  canary_patterns: ["mp-test-"]      # optional regexes that flag canary tokens
+
+  detection:
+    min_score: 250                   # optional, drop me below this score
+
+  cache_ttl_seconds: 300             # optional, overrides global cache TTL
+
+  retry_policy:
+    max_attempts: 3                  # total tries (1 = no retries)
+    on_status: [429, 502, 503, 504]  # default [429, 5xx]
+    initial_backoff_ms: 200
+    max_backoff_ms: 5000
+
+  validation:
+    method: POST                     # GET POST PUT DELETE PATCH GRAPHQL
+    url: "https://api.example.com/v1/me"
+    auth: bearer                     # none | bearer | basic | basic_composite | header:<name> | query:<name>
+    headers:
+      Content-Type: application/json
+    body: '{"hello":"world"}'        # templated; {{key}} {{key.client_id}} {{key.secret}} {{header.<name>}}
+    endpoints:                       # optional parallel race set
+      - url: "https://api-eu.example.com/v1/me"
+        headers: { X-Region: eu }
+    error_check:
+      json_path: error.code
+    expected_status: [200]
+    response_match:                  # optional "is valid only if" rule
+      body_regex: '"status":"active"'
+      body_jsonpath: account.state
+      jsonpath_value: active
+      header_contains: "x-account-state: enabled"
+    failure_when:                    # optional "treat as invalid if" rule
+      body_regex: '"deactivated":true'
+      body_jsonpath: account.state
+      jsonpath_value: suspended
+    retry_on_status: [502, 503]
+
+  regional_endpoints:                # race alongside validation.url
+    - url: "https://us.example.com/v1/me"
+      region: us-east-1
+    - url: "https://eu.example.com/v1/me"
+      region: eu-west-1
+
+  metadata:                          # optional enrichment steps
+    - url: "https://api.example.com/v1/me"
+      method: GET
+      auth: bearer
+      headers: {}
+      balance_path: account.balance
+      extract: data.0.id
+      store_as: team_id
+      regex_extract: 'org_id=([a-f0-9]+)'
+      regex_extract_match: 1
+
+  metadata_from_validation:          # optional, applied to the validation response
+    balance_path: account.credits
+    balance_subtract_path: account.used
+    name_path: account.name
+    name_fallback_path: account.full_name
+    email_path: account.email
+    quota_path: account.quota
+    credits_path: account.credits
+    vip_level_path: account.vip_level
+    team_name_path: account.team.name
+    username_path: account.username
+    regex_extract: 'session_token=([A-Za-z0-9]+)'
+    regex_extract_match: 1
+```
+
+### Templating in URLs and Bodies
+
+`{{key}}` — full API key. `{{key.client_id}}` and `{{key.secret}}` — split when the key is in `client_id:secret` form. `{{header.<name>}}` — value of the named response header from the previous step. Variables from `metadata[].store_as` are threaded forward through subsequent metadata steps but NOT into the validation request itself.
+
+### Auth Schemes
+
+| Value | Effect |
+|---|---|
+| `none` / `""` | No auth header set. |
+| `bearer` | `Authorization: Bearer <key>` |
+| `basic` | `Authorization: Basic <base64(key:)>`. Use a real value with a `:` if you want a password. |
+| `basic_composite` | Splits the key on `:` and uses HTTP basic with `client_id:secret`. |
+| `header:<name>` | Sets the named header to the key (e.g. `header:x-api-key`). |
+| `query:<name>` | Adds `?<name>=<key>` to the URL. |
 
 ---
 

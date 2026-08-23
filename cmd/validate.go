@@ -10,6 +10,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Grey-Magic/kunji/pkg/audit"
+	"github.com/Grey-Magic/kunji/pkg/client"
+	"github.com/Grey-Magic/kunji/pkg/history"
 	"github.com/Grey-Magic/kunji/pkg/runner"
 	"github.com/Grey-Magic/kunji/pkg/sink"
 	"github.com/Grey-Magic/kunji/pkg/source"
@@ -65,6 +68,15 @@ var (
 	noCache             bool
 	cacheFile           string
 	cacheTTLSecs        int
+	filterExprs         []string
+	failIf              []string
+	auditFile           string
+	noAudit             bool
+	dedupeEmit          bool
+	validateHistoryFile string
+	noHistory           bool
+	shardedPool         bool
+	useHTTP3            bool
 )
 
 var validateCmd = &cobra.Command{
@@ -122,6 +134,18 @@ var validateCmd = &cobra.Command{
 			os.Exit(1)
 		}
 
+		parsedFilter, err := runner.ParseFilterExprs(filterExprs)
+		if err != nil {
+			pterm.Error.Printfln("Invalid --filter: %v", err)
+			os.Exit(1)
+		}
+
+		parsedThresholds, err := runner.ParseThresholds(failIf)
+		if err != nil {
+			pterm.Error.Printfln("Invalid --fail-if: %v", err)
+			os.Exit(1)
+		}
+
 		runr, err := runner.NewRunnerWithOptions(threads, proxy, retries, timeout, outputFile, provider, category, resume, onlyValid, minBalance, skipMetadata, canaryCheck, validators.FactoryOptions{
 			PersistentCachePath: cacheFile,
 			PersistentCacheTTL:  time.Duration(cacheTTLSecs) * time.Second,
@@ -137,6 +161,45 @@ var validateCmd = &cobra.Command{
 		runr.Quiet = quiet
 		runr.Format = format
 		runr.NoCache = noCache
+		runr.FilterExprs = parsedFilter
+		runr.Thresholds = parsedThresholds
+		runr.EmitDedupe = dedupeEmit
+		runr.Sharded = shardedPool
+
+		if useHTTP3 {
+			client.EnableHTTP3(true)
+			// The actual QUIC client requires github.com/quic-go/quic-go;
+			// until it's added the request falls back to HTTP/2 silently.
+			pterm.Info.Println("HTTP/3 requested: quic-go not vendored, falling back to HTTP/2.")
+		}
+
+		if !noAudit {
+			auditPath := auditFile
+			if auditPath == "" {
+				auditPath = audit.DefaultPath()
+			}
+			al, err := audit.Open(auditPath)
+			if err != nil {
+				pterm.Warning.Printfln("audit log disabled: %v", err)
+			} else {
+				runr.Audit = al
+				defer al.Close()
+			}
+		}
+		if !noHistory {
+			histPath := validateHistoryFile
+			if histPath == "" {
+				histPath = history.DefaultPath()
+			}
+			hl, err := history.Open(histPath, history.NewRunID())
+			if err != nil {
+				pterm.Warning.Printfln("history log disabled: %v", err)
+			} else {
+				runr.History = hl
+				runr.RunID = hl.RunID()
+				defer hl.Close()
+			}
+		}
 		if format == "jsonl" {
 			runr.Quiet = true
 		}
@@ -231,6 +294,17 @@ var validateCmd = &cobra.Command{
 		}
 
 		runr.Run(stream, count)
+
+		// CI threshold check. Any violated --fail-if clause exits non-zero
+		// so this run can gate CI pipelines.
+		if len(parsedThresholds) > 0 {
+			violated, ok := runner.Evaluate(parsedThresholds, runr.Stats)
+			if !ok {
+				pterm.Error.Printfln("CI threshold violated: %s",
+					runner.FormatViolations(violated, runr.Stats))
+				os.Exit(2)
+			}
+		}
 	},
 }
 
@@ -327,6 +401,16 @@ func init() {
 	validateCmd.Flags().BoolVar(&noCache, "no-cache", false, "Skip both positive and negative caches; force network revalidation of every key")
 	validateCmd.Flags().StringVar(&cacheFile, "cache-file", defaultCacheFile, "Path to the persistent positive cache (JSONL). Empty disables persistence; default is ~/.kunji/pos_cache.jsonl")
 	validateCmd.Flags().IntVar(&cacheTTLSecs, "cache-ttl", 300, "Positive-cache freshness window in seconds (default 300 = 5 minutes)")
+
+	validateCmd.Flags().StringArrayVar(&filterExprs, "filter", nil, "Pre-output filter: 'field=value' or 'field!=value'. Repeatable. Supported fields: provider, is_valid, status_code, error_code, key.")
+	validateCmd.Flags().StringArrayVar(&failIf, "fail-if", nil, "CI threshold: 'metric op value[%]'. Repeatable. Metrics: invalid, valid, error, rate_limit, skipped, total. Example: 'invalid > 5%'.")
+	validateCmd.Flags().StringVar(&auditFile, "audit-file", "", "Path to the audit log JSONL (default ~/.kunji/audit.jsonl; '' disables)")
+	validateCmd.Flags().BoolVar(&noAudit, "no-audit", false, "Disable audit logging for this run")
+	validateCmd.Flags().BoolVar(&dedupeEmit, "dedupe-emit", false, "Suppress duplicate (provider, key, is_valid) emits in the JSONL stream")
+	validateCmd.Flags().StringVar(&validateHistoryFile, "history-file", "", "Path to the cross-run history JSONL (default ~/.kunji/history.jsonl; '' disables)")
+	validateCmd.Flags().BoolVar(&noHistory, "no-history", false, "Disable cross-run history persistence for this run")
+	validateCmd.Flags().BoolVar(&shardedPool, "sharded", false, "Use per-provider worker pools (reduces lock contention on the proxy rotator and rate limiter for mixed-provider inputs)")
+	validateCmd.Flags().BoolVar(&useHTTP3, "http3", false, "Prefer HTTP/3 (QUIC) for outbound requests. Requires the github.com/quic-go/quic-go dependency; falls back to HTTP/2 if unavailable.")
 
 	validateCmd.RegisterFlagCompletionFunc("provider", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 		providers, err := validators.GetAllProviders()

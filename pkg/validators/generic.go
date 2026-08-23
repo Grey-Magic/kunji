@@ -68,6 +68,11 @@ func NewGenericValidator(cfg ProviderConfig, proxy string, timeout int) (*Generi
 func (v *GenericValidator) Name() string          { return v.config.Name }
 func (v *GenericValidator) KeyPatterns() []string { return v.config.KeyPatterns }
 
+// Config returns a copy of the provider configuration so callers (e.g. the
+// runner's retry budget) can read per-provider tuning fields without being
+// able to mutate the validator's internal state.
+func (v *GenericValidator) Config() ProviderConfig { return v.config }
+
 func (v *GenericValidator) SetSkipMetadata(skip bool) {
 	v.skipMetadata = skip
 }
@@ -338,7 +343,7 @@ func (v *GenericValidator) Validate(ctx context.Context, apiKey string) (*models
 	}
 
 	cfg := v.config.Validation
-	endpoints := v.buildEndpointList(cfg)
+	endpoints := v.buildEndpointList(cfg, v.config.RegionalEndpoints)
 
 	var result *models.ValidationResult
 	var resultErr error
@@ -402,7 +407,8 @@ func (v *GenericValidator) Validate(ctx context.Context, apiKey string) (*models
 	}
 
 	if v.cache != nil && result != nil {
-		v.cache.Set(v.Name(), apiKey, result)
+		ttl := time.Duration(v.config.CacheTTLSeconds) * time.Second
+		v.cache.SetWithTTL(v.Name(), apiKey, result, ttl)
 	}
 
 	if result != nil {
@@ -429,20 +435,15 @@ func (v *GenericValidator) Validate(ctx context.Context, apiKey string) (*models
 type endpointInfo struct {
 	url     string
 	headers map[string]string
+	region  string // optional human-readable label (e.g. "us-east-1"); "" for primary
 }
 
-func (v *GenericValidator) buildEndpointList(cfg ValidationConfig) []endpointInfo {
+func (v *GenericValidator) buildEndpointList(cfg ValidationConfig, regional []EndpointConfig) []endpointInfo {
 	endpoints := []endpointInfo{}
 
 	if len(cfg.Endpoints) > 0 {
 		for _, ep := range cfg.Endpoints {
-			headers := make(map[string]string)
-			for k, val := range cfg.Headers {
-				headers[k] = val
-			}
-			for k, val := range ep.Headers {
-				headers[k] = val
-			}
+			headers := mergeHeaders(cfg.Headers, ep.Headers)
 			endpoints = append(endpoints, endpointInfo{
 				url:     ep.URL,
 				headers: headers,
@@ -457,6 +458,19 @@ func (v *GenericValidator) buildEndpointList(cfg ValidationConfig) []endpointInf
 		})
 	}
 
+	// Regional endpoints are appended last so they participate in the
+	// parallel race alongside the primary URL. The first 2xx wins.
+	for _, ep := range regional {
+		if ep.URL == "" {
+			continue
+		}
+		endpoints = append(endpoints, endpointInfo{
+			url:     ep.URL,
+			headers: mergeHeaders(cfg.Headers, ep.Headers),
+			region:  ep.Region,
+		})
+	}
+
 	if len(endpoints) == 0 {
 		endpoints = append(endpoints, endpointInfo{
 			url:     cfg.URL,
@@ -465,6 +479,20 @@ func (v *GenericValidator) buildEndpointList(cfg ValidationConfig) []endpointInf
 	}
 
 	return endpoints
+}
+
+func mergeHeaders(global, override map[string]string) map[string]string {
+	if len(global) == 0 && len(override) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(global)+len(override))
+	for k, v := range global {
+		out[k] = v
+	}
+	for k, v := range override {
+		out[k] = v
+	}
+	return out
 }
 
 func (v *GenericValidator) validateWithEndpoint(ctx context.Context, apiKey string, cfg ValidationConfig, ep endpointInfo) (*models.ValidationResult, error) {
@@ -530,6 +558,12 @@ func (v *GenericValidator) validateWithEndpoint(ctx context.Context, apiKey stri
 		Endpoint:     url,
 		ResponseTime: duration,
 	}
+	if ep.region != "" {
+		if result.Extra == nil {
+			result.Extra = make(map[string]interface{})
+		}
+		result.Extra["region"] = ep.region
+	}
 
 	if err != nil {
 		if v.limiter != nil {
@@ -587,6 +621,9 @@ func (v *GenericValidator) validateWithEndpoint(ctx context.Context, apiKey stri
 		result.IsValid = true
 		if isGraphQL {
 			v.extractGraphQLMetadata(bodyBytes, result)
+		}
+		if LooksOpenAPI(bodyBytes) {
+			ExtractOpenAPIMetadata(bodyBytes, result)
 		}
 		v.extractValidationMetadata(bodyBytes, result)
 		if !v.skipMetadata {
