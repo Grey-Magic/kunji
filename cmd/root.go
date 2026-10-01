@@ -4,13 +4,19 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/Grey-Magic/kunji/pkg/config"
 	"github.com/pterm/pterm"
 	"github.com/spf13/cobra"
 )
 
+// profileFlag holds the value of --profile from the command line. It is
+// applied to flag defaults BEFORE parsing so the right profile takes effect
+// even for subcommand flags like --threads.
+var profileFlag string
+
 var rootCmd = &cobra.Command{
 	Use:     "kunji",
-	Version: "1.1.0",
+	Version: "1.2.0",
 	Short:   "A fast, concurrent CLI tool for validating API keys.",
 	Long: `Kunji is a high-performance command-line utility written in Go.
 It rapidly tests API keys from various services and providers
@@ -51,9 +57,34 @@ func init() {
 		PrintBanner()
 		originalHelp(cmd, args)
 	})
+
+	rootCmd.PersistentFlags().StringVar(&profileFlag, "profile", "",
+		"Configuration profile to apply (overrides default_profile / KUNJI_PROFILE)")
+	rootCmd.PersistentFlags().String("config", "",
+		"Path to config file (overrides ~/.kunji/config.yaml and KUNJI_CONFIG)")
 }
 
 func Execute() {
+	cfg, err := config.Load()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "config error:", err)
+		os.Exit(1)
+	}
+
+	// --config flag takes priority over KUNJI_CONFIG / default path. If the
+	// user passed --config explicitly, reload from that path so the values
+	// they specified are what we apply.
+	if cfgPath, _ := rootCmd.PersistentFlags().GetString("config"); cfgPath != "" {
+		if c, err := config.LoadFrom(cfgPath); err == nil {
+			cfg = c
+		} else {
+			fmt.Fprintln(os.Stderr, "config error:", err)
+			os.Exit(1)
+		}
+	}
+
+	cfg.Apply(rootCmd, profileFlag)
+
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)

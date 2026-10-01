@@ -60,16 +60,6 @@ var listSecurityCmd = &cobra.Command{
 	},
 }
 
-var providerName string
-
-var showProviderCmd = &cobra.Command{
-	Use:   "google",
-	Short: "Show all services for a provider (e.g., google, github, mapbox)",
-	Run: func(cmd *cobra.Command, args []string) {
-		showProviderServices(providerName)
-	},
-}
-
 func init() {
 	rootCmd.AddCommand(providersCmd)
 	providersCmd.AddCommand(listCategoriesCmd)

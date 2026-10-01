@@ -101,67 +101,6 @@ func ValidateURL(rawURL string) error {
 	return nil
 }
 
-type ValidationError struct {
-	Code    string
-	Message string
-	Detail  string
-}
-
-func (e *ValidationError) Error() string {
-	if e.Detail != "" {
-		return fmt.Sprintf("[%s] %s: %s", e.Code, e.Message, e.Detail)
-	}
-	return fmt.Sprintf("[%s] %s", e.Code, e.Message)
-}
-
-var (
-	ErrInvalidKey    = &ValidationError{Code: "INVALID_KEY", Message: "Invalid API key"}
-	ErrDisabled      = &ValidationError{Code: "DISABLED", Message: "API key is disabled"}
-	ErrExpired       = &ValidationError{Code: "EXPIRED", Message: "API key has expired"}
-	ErrRevoked       = &ValidationError{Code: "REVOKED", Message: "API key was revoked"}
-	ErrBlocked       = &ValidationError{Code: "BLOCKED", Message: "API key is blocked"}
-	ErrRateLimited   = &ValidationError{Code: "RATE_LIMITED", Message: "Rate limit exceeded"}
-	ErrQuotaExceeded = &ValidationError{Code: "QUOTA_EXCEEDED", Message: "Quota exceeded"}
-	ErrNotFound      = &ValidationError{Code: "NOT_FOUND", Message: "Resource not found"}
-	ErrForbidden     = &ValidationError{Code: "FORBIDDEN", Message: "Access forbidden"}
-	ErrUnauthorized  = &ValidationError{Code: "UNAUTHORIZED", Message: "Unauthorized - check API key"}
-	ErrServerError   = &ValidationError{Code: "SERVER_ERROR", Message: "Server error"}
-	ErrNetworkError  = &ValidationError{Code: "NETWORK_ERROR", Message: "Network error"}
-	ErrTimeout       = &ValidationError{Code: "TIMEOUT", Message: "Request timed out"}
-	ErrUnknown       = &ValidationError{Code: "UNKNOWN", Message: "Unknown error"}
-)
-
-func ParseErrorFromResponse(body []byte, statusCode int, apiKey string) *ValidationError {
-	msg := ParseAPIError(body, apiKey)
-
-	lowerMsg := strings.ToLower(msg)
-
-	switch {
-	case statusCode == 401 || strings.Contains(lowerMsg, "unauthorized") || strings.Contains(lowerMsg, "invalid"):
-		return &ValidationError{Code: "INVALID_KEY", Message: "Invalid API key", Detail: msg}
-	case statusCode == 403 || strings.Contains(lowerMsg, "forbidden") || strings.Contains(lowerMsg, "access denied"):
-		return &ValidationError{Code: "FORBIDDEN", Message: "Access forbidden", Detail: msg}
-	case strings.Contains(lowerMsg, "disabled"):
-		return &ValidationError{Code: "DISABLED", Message: "API key is disabled", Detail: msg}
-	case strings.Contains(lowerMsg, "expired"):
-		return &ValidationError{Code: "EXPIRED", Message: "API key has expired", Detail: msg}
-	case strings.Contains(lowerMsg, "revok"):
-		return &ValidationError{Code: "REVOKED", Message: "API key was revoked", Detail: msg}
-	case strings.Contains(lowerMsg, "block"):
-		return &ValidationError{Code: "BLOCKED", Message: "API key is blocked", Detail: msg}
-	case statusCode == 429 || strings.Contains(lowerMsg, "rate limit"):
-		return &ValidationError{Code: "RATE_LIMITED", Message: "Rate limit exceeded", Detail: msg}
-	case strings.Contains(lowerMsg, "quota") || strings.Contains(lowerMsg, "limit exceeded"):
-		return &ValidationError{Code: "QUOTA_EXCEEDED", Message: "Quota exceeded", Detail: msg}
-	case statusCode == 404 || strings.Contains(lowerMsg, "not found"):
-		return &ValidationError{Code: "NOT_FOUND", Message: "Resource not found", Detail: msg}
-	case statusCode >= 500:
-		return &ValidationError{Code: "SERVER_ERROR", Message: "Server error", Detail: msg}
-	default:
-		return &ValidationError{Code: "UNKNOWN", Message: msg}
-	}
-}
-
 func ParseAPIError(body []byte, apiKey string) string {
 	if len(body) == 0 {
 		return "Unknown error (empty body)"
@@ -204,13 +143,6 @@ func ParseAPIError(body []byte, apiKey string) string {
 	}
 
 	return truncateStr(msg, 150)
-}
-
-func ScrubAPIKey(msg, apiKey string) string {
-	if apiKey == "" {
-		return msg
-	}
-	return strings.ReplaceAll(msg, apiKey, "[MASKED_KEY]")
 }
 
 func enhanceErrorMessage(msg string, jsonErr map[string]interface{}) string {

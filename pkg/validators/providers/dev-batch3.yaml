@@ -1,0 +1,46 @@
+- name: triggerdotdev
+  category: developer
+  key_prefixes: ["tr_dev_", "tr_prod_", "tr_stg_", "tr_pat_"]
+  key_patterns: ["^tr_(dev|prod|stg|pat)_[a-zA-Z0-9_-]{10,}$"]
+  validation:
+    method: GET
+    url: "https://api.trigger.dev/api/v1/runs?limit=1"
+    auth: "bearer"
+  detection:
+    min_score: 200
+
+- name: unkey
+  category: developer
+  key_prefixes: ["unkey_"]
+  key_patterns: ["^unkey_[a-zA-Z0-9_-]{10,}$"]
+  validation:
+    method: POST
+    url: "https://api.unkey.com/v2/keys.verifyKey"
+    auth: "bearer"
+    headers:
+      content-type: "application/json"
+    body: '{"key":"kunji-invalid-probe-key-00000000"}'
+  detection:
+    min_score: 200
+
+- name: rubygems
+  category: developer
+  key_prefixes: ["rubygems_"]
+  key_patterns: ["^rubygems_[a-zA-Z0-9]{20,}$"]
+  validation:
+    method: GET
+    url: "https://rubygems.org/api/v1/profile/me"
+    auth: "header:Authorization"
+  detection:
+    min_score: 200
+
+- name: cursor
+  category: llm
+  key_prefixes: ["crsr_"]
+  key_patterns: ["^crsr_[a-zA-Z0-9]{32,}$"]
+  validation:
+    method: GET
+    url: "https://api.cursor.com/v1/me"
+    auth: "bearer"
+  detection:
+    min_score: 200

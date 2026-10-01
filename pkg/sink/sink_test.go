@@ -37,7 +37,11 @@ func TestHTTPSink_PostsEachResult(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	s, err := NewHTTPSink(srv.URL, FilterAll, 5)
+	s, err := NewHTTPSinkWithFormatter(srv.URL, FilterAll, PlatformRaw, FormatterOptions{}, HTTPSinkOptions{
+		Timeout:         5 * time.Second,
+		RetryBackoff:    500 * time.Millisecond,
+		RetryMaxBackoff: 10 * time.Second,
+	})
 	require.NoError(t, err)
 
 	results := []*models.ValidationResult{
@@ -77,7 +81,11 @@ func TestHTTPSink_TemplateSubstitutesProvider(t *testing.T) {
 	defer srv.Close()
 
 	url := srv.URL + "/hook/{provider}/event"
-	s, err := NewHTTPSink(url, FilterAll, 5)
+	s, err := NewHTTPSinkWithFormatter(url, FilterAll, PlatformRaw, FormatterOptions{}, HTTPSinkOptions{
+		Timeout:         5 * time.Second,
+		RetryBackoff:    500 * time.Millisecond,
+		RetryMaxBackoff: 10 * time.Second,
+	})
 	require.NoError(t, err)
 
 	require.NoError(t, s.Emit(context.Background(), &models.ValidationResult{Provider: "openai/fake path"}))
@@ -95,7 +103,11 @@ func TestHTTPSink_FilterValidSkipsInvalid(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	s, err := NewHTTPSink(srv.URL, FilterValid, 5)
+	s, err := NewHTTPSinkWithFormatter(srv.URL, FilterValid, PlatformRaw, FormatterOptions{}, HTTPSinkOptions{
+		Timeout:         5 * time.Second,
+		RetryBackoff:    500 * time.Millisecond,
+		RetryMaxBackoff: 10 * time.Second,
+	})
 	require.NoError(t, err)
 
 	require.NoError(t, s.Emit(context.Background(), &models.ValidationResult{Provider: "p1", IsValid: true}))
@@ -111,7 +123,11 @@ func TestHTTPSink_Non2xxCountsAsFailure(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	s, err := NewHTTPSink(srv.URL, FilterAll, 5)
+	s, err := NewHTTPSinkWithFormatter(srv.URL, FilterAll, PlatformRaw, FormatterOptions{}, HTTPSinkOptions{
+		Timeout:         5 * time.Second,
+		RetryBackoff:    500 * time.Millisecond,
+		RetryMaxBackoff: 10 * time.Second,
+	})
 	require.NoError(t, err)
 
 	err = s.Emit(context.Background(), &models.ValidationResult{Provider: "x", IsValid: true})

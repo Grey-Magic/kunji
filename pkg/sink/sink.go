@@ -48,12 +48,6 @@ type Sink interface {
 	Close() error
 }
 
-// Nop is a no-op sink used as a placeholder when no --webhook/--sink is set.
-type Nop struct{}
-
-func (Nop) Emit(context.Context, *models.ValidationResult) error { return nil }
-func (Nop) Close() error                                         { return nil }
-
 // HTTPSinkOptions configures an HTTPSink. All fields are optional; zero
 // values yield the legacy behavior (raw JSON body, no extra headers, no
 // retries, no signature).
@@ -96,17 +90,6 @@ type HTTPSink struct {
 	failCount int64
 }
 
-// NewHTTPSink builds an HTTP sink with raw-JSON formatting and a 10-second
-// per-request timeout. timeoutSecs<1 falls back to 10s. For platform-specific
-// formatting use NewHTTPSinkWithFormatter.
-func NewHTTPSink(rawURL string, filter Filter, timeoutSecs int) (*HTTPSink, error) {
-	return NewHTTPSinkWithFormatter(rawURL, filter, PlatformRaw, FormatterOptions{}, HTTPSinkOptions{
-		Timeout:         timeoutOrDefault(timeoutSecs),
-		RetryBackoff:    500 * time.Millisecond,
-		RetryMaxBackoff: 10 * time.Second,
-	})
-}
-
 // NewHTTPSinkWithFormatter builds an HTTP sink with the given platform
 // formatter and options. timeoutSecs in opts.Timeout is overridden by a
 // non-zero Timeout field.
@@ -140,13 +123,6 @@ func NewHTTPSinkWithFormatter(rawURL string, filter Filter, platform Platform, f
 		formatter: formatter,
 		opts:      sinkOpts,
 	}, nil
-}
-
-func timeoutOrDefault(secs int) time.Duration {
-	if secs < 1 {
-		return 10 * time.Second
-	}
-	return time.Duration(secs) * time.Second
 }
 
 func (s *HTTPSink) resolveURL(provider string) string {
@@ -291,10 +267,7 @@ func isRetryable(err error) bool {
 	}
 	// Any non-permanent error (network, timeout, EOF) is retryable.
 	var p *permanentError
-	if errors.As(err, &p) {
-		return false
-	}
-	return true
+	return !errors.As(err, &p)
 }
 
 // Sentinel for tests / callers that want to distinguish.

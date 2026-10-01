@@ -26,7 +26,7 @@
     method: POST
     url: "https://api.deepseek.com/v1/chat/completions"
     auth: "bearer"
-    body: '{"model":"deepseek-chat","messages":[{"role":"user","content":"Hi"}],"max_tokens":1}'
+    body: '{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"Hi"}],"max_tokens":1}'
   metadata:
     - url: "https://api.deepseek.com/user/balance"
       method: GET

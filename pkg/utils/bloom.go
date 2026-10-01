@@ -2,7 +2,6 @@ package utils
 
 import (
 	"encoding/binary"
-	"fmt"
 	"hash/fnv"
 	"io"
 	"math"
@@ -103,20 +102,4 @@ func (bf *BloomFilter) hash(data string, seed uint64) uint64 {
 	h.Write([]byte(data))
 	val := h.Sum64()
 	return val ^ (seed * 0xbf58476d1ce4e5b9)
-}
-
-func (bf *BloomFilter) Clear() {
-	for i := range bf.bitset {
-		bf.bitset[i] = 0
-	}
-}
-
-func (bf *BloomFilter) Merge(other *BloomFilter) error {
-	if bf.m != other.m || bf.k != other.k {
-		return fmt.Errorf("incompatible bloom filters")
-	}
-	for i := range bf.bitset {
-		bf.bitset[i] |= other.bitset[i]
-	}
-	return nil
 }

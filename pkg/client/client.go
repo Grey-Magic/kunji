@@ -4,13 +4,15 @@ import (
 	"bufio"
 	"context"
 	"crypto/rand"
-	"crypto/tls"
+	"encoding/json"
 	"fmt"
+	"io"
 	"math/big"
 	"net"
 	"net/http"
 	"net/url"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -52,18 +54,43 @@ func ApplyEvasionHeaders(req *http.Request) {
 
 	// Randomize Sec-Ch-Ua based on common browser patterns
 	req.Header.Set("Sec-Ch-Ua-Mobile", "?0")
-	req.Header.Set("Sec-Ch-Ua-Platform", "\"Windows\"")
+	platforms := []string{"\"Windows\"", "\"macOS\"", "\"Linux\""}
+	platIdx, _ := rand.Int(rand.Reader, big.NewInt(int64(len(platforms))))
+	req.Header.Set("Sec-Ch-Ua-Platform", platforms[platIdx.Int64()])
+
+	// Per-request subset of benign optional headers. Each is safe to send
+	// to any JSON API (no behavioral side effects), and varying the header
+	// SET per request changes the fingerprint beyond what value rotation
+	// alone achieves. (Wire ORDER cannot be varied: Go's transport always
+	// emits headers sorted. True order randomization would need a forked
+	// transport and is out of scope.)
+	optional := [][2]string{
+		{"DNT", "1"},
+		{"Upgrade-Insecure-Requests", "1"},
+		{"Sec-GPC", "1"},
+	}
+	for _, h := range optional {
+		roll, _ := rand.Int(rand.Reader, big.NewInt(2))
+		if roll.Int64() == 1 {
+			req.Header.Set(h[0], h[1])
+		}
+	}
 }
 
 type ProxyRotator struct {
 	proxies []*url.URL
 	index   int
 	mux     sync.Mutex
+	// Per-proxy observations from the last FilterDeadProxies run, keyed by
+	// proxy URL string. GetProxy stays plain round-robin, but survivors are
+	// sorted fastest-first so rotation prefers responsive proxies.
+	latency map[string]time.Duration
+	egress  map[string]string
 }
 
 func NewProxyRotator(proxyInput string) (*ProxyRotator, error) {
 	if proxyInput == "" {
-		return &ProxyRotator{proxies: nil}, nil
+		return &ProxyRotator{proxies: nil, latency: map[string]time.Duration{}, egress: map[string]string{}}, nil
 	}
 
 	urls := []*url.URL{}
@@ -85,7 +112,7 @@ func NewProxyRotator(proxyInput string) (*ProxyRotator, error) {
 			}
 		}
 		if len(urls) > 0 {
-			return &ProxyRotator{proxies: urls}, nil
+			return &ProxyRotator{proxies: urls, latency: map[string]time.Duration{}, egress: map[string]string{}}, nil
 		}
 	}
 
@@ -98,7 +125,7 @@ func NewProxyRotator(proxyInput string) (*ProxyRotator, error) {
 		urls = append(urls, u)
 	}
 
-	return &ProxyRotator{proxies: urls}, nil
+	return &ProxyRotator{proxies: urls, latency: map[string]time.Duration{}, egress: map[string]string{}}, nil
 }
 
 func (pr *ProxyRotator) GetProxy(req *http.Request) (*url.URL, error) {
@@ -112,38 +139,21 @@ func (pr *ProxyRotator) GetProxy(req *http.Request) (*url.URL, error) {
 	return p, nil
 }
 
-func (pr *ProxyRotator) ReportFailure(pxy *url.URL) {
-	pr.mux.Lock()
-	defer pr.mux.Unlock()
-
-	newProxies := []*url.URL{}
-	found := false
-	for _, p := range pr.proxies {
-		if p.String() == pxy.String() {
-			found = true
-			continue
-		}
-		newProxies = append(newProxies, p)
-	}
-
-	if found {
-		pr.proxies = newProxies
-		if len(pr.proxies) > 0 {
-			pr.index = pr.index % len(pr.proxies)
-		}
-	}
-}
-
 func (pr *ProxyRotator) FilterDeadProxies(timeoutSecs int) int {
 	if len(pr.proxies) == 0 {
 		return 0
 	}
 
 	var wg sync.WaitGroup
-	var mu sync.Mutex
-	validProxies := []*url.URL{}
 
 	testURL := "https://api.ipify.org?format=json"
+
+	type probeResult struct {
+		proxy   *url.URL
+		latency time.Duration
+		egress  string
+	}
+	results := make(chan probeResult, len(pr.proxies))
 
 	for _, p := range pr.proxies {
 		wg.Add(1)
@@ -164,27 +174,78 @@ func (pr *ProxyRotator) FilterDeadProxies(timeoutSecs int) int {
 			req, _ := http.NewRequest("GET", testURL, nil)
 			req.Header.Set("User-Agent", GetRandomUserAgent())
 
+			start := time.Now()
 			resp, err := client.Do(req)
-			if err == nil {
-				defer resp.Body.Close()
-				if resp.StatusCode == 200 {
-					mu.Lock()
-					validProxies = append(validProxies, pxy)
-					mu.Unlock()
-				}
+			if err != nil {
+				return
 			}
+			defer resp.Body.Close()
+			if resp.StatusCode != 200 {
+				return
+			}
+			// The same probe doubles as egress-IP discovery: ipify echoes
+			// the exit address, which users need for target allowlisting.
+			var body struct {
+				IP string `json:"ip"`
+			}
+			_ = json.NewDecoder(io.LimitReader(resp.Body, 1024)).Decode(&body)
+			results <- probeResult{proxy: pxy, latency: time.Since(start), egress: body.IP}
 		}(p)
 	}
 
 	wg.Wait()
+	close(results)
 
-	deadCount := len(pr.proxies) - len(validProxies)
+	type scored struct {
+		proxy   *url.URL
+		latency time.Duration
+		egress  string
+	}
+	var alive []scored
+	for r := range results {
+		alive = append(alive, scored(r))
+	}
+	// Fastest-first so plain round-robin prefers responsive proxies.
+	sort.Slice(alive, func(i, j int) bool { return alive[i].latency < alive[j].latency })
+
+	deadCount := len(pr.proxies) - len(alive)
 	pr.mux.Lock()
-	pr.proxies = validProxies
+	pr.proxies = pr.proxies[:0]
+	pr.latency = make(map[string]time.Duration, len(alive))
+	pr.egress = make(map[string]string, len(alive))
+	for _, a := range alive {
+		pr.proxies = append(pr.proxies, a.proxy)
+		pr.latency[a.proxy.String()] = a.latency
+		if a.egress != "" {
+			pr.egress[a.proxy.String()] = a.egress
+		}
+	}
 	pr.index = 0
 	pr.mux.Unlock()
 
 	return deadCount
+}
+
+// Fastest reports the lowest-latency alive proxy from the last scoring run.
+func (pr *ProxyRotator) Fastest() (proxy, egress string, latency time.Duration, ok bool) {
+	pr.mux.Lock()
+	defer pr.mux.Unlock()
+	if len(pr.proxies) == 0 {
+		return "", "", 0, false
+	}
+	p := pr.proxies[0].String()
+	return p, pr.egress[p], pr.latency[p], true
+}
+
+// EgressIPs maps each alive proxy URL to its last observed exit address.
+func (pr *ProxyRotator) EgressIPs() map[string]string {
+	pr.mux.Lock()
+	defer pr.mux.Unlock()
+	out := make(map[string]string, len(pr.egress))
+	for k, v := range pr.egress {
+		out[k] = v
+	}
+	return out
 }
 
 type providerState struct {
@@ -455,15 +516,9 @@ func NewHTTPClient(proxyStr string, timeoutSecs int) (*http.Client, *ProxyRotato
 
 	transport := poolMgr.BuildTransport(dialer, rotator.GetProxy)
 
-	// TLS Fingerprinting (JA3-like randomization)
-	// Use TLS 1.2 as minimum - this allows TLS 1.3 negotiation while preventing TLS 1.0/1.1
-	transport.TLSClientConfig = &tls.Config{
-		MinVersion:         tls.VersionTLS12, // Use fixed minimum, randomize cipher suites instead
-		InsecureSkipVerify: false,
-		NextProtos:         []string{"h2", "http/1.1"},
-		// Cipher suite randomization happens at TLS negotiation time
-		// This provides fingerprinting diversity without breaking protocol compatibility
-	}
+	// Per-client ClientHello diversification (cipher/curve order shuffled
+	// in randomizedTLSConfig). See tlsprofile.go for scope and limits.
+	transport.TLSClientConfig = randomizedTLSConfig()
 
 	transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
 		host, port, _ := net.SplitHostPort(addr)
@@ -484,8 +539,16 @@ func NewHTTPClient(proxyStr string, timeoutSecs int) (*http.Client, *ProxyRotato
 
 	transport.ResponseHeaderTimeout = totalTimeout
 
+	// HTTP/3 is opt-in and direct-only: QUIC cannot run through a CONNECT
+	// proxy (that needs CONNECT-UDP/MASQUE), so a configured proxy keeps
+	// plain HTTP/2. See http3.go for the racing/fallback design.
+	var rt http.RoundTripper = transport
+	if HTTP3Enabled() && proxyStr == "" {
+		rt = newRacingRoundTripper(transport)
+	}
+
 	client := &http.Client{
-		Transport: transport,
+		Transport: rt,
 		Timeout:   totalTimeout,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			return http.ErrUseLastResponse

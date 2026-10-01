@@ -59,8 +59,18 @@ func (c *ValidationCache) Get(provider, apiKey string) (*models.ValidationResult
 }
 
 func (c *ValidationCache) Set(provider, apiKey string, result *models.ValidationResult) {
+	c.SetWithTTL(provider, apiKey, result, c.ttl)
+}
+
+// SetWithTTL stores result with the given TTL. ttl <= 0 falls back to the
+// cache's default. Used by validators to honor per-provider cache_ttl_seconds
+// declared in their YAML schema.
+func (c *ValidationCache) SetWithTTL(provider, apiKey string, result *models.ValidationResult, ttl time.Duration) {
 	if result == nil {
 		return
+	}
+	if ttl <= 0 {
+		ttl = c.ttl
 	}
 
 	c.mu.Lock()
@@ -86,7 +96,7 @@ func (c *ValidationCache) Set(provider, apiKey string, result *models.Validation
 	key := c.cacheKey(provider, apiKey)
 	c.entries[key] = cacheEntry{
 		result:    result,
-		expiresAt: time.Now().Add(c.ttl),
+		expiresAt: time.Now().Add(ttl),
 	}
 }
 

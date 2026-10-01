@@ -49,24 +49,13 @@ func NewGenericValidatorWithClient(cfg ProviderConfig, httpClient *http.Client, 
 	}
 }
 
-func NewGenericValidator(cfg ProviderConfig, proxy string, timeout int) (*GenericValidator, error) {
-	httpClient, _, err := client.NewHTTPClient(proxy, timeout)
-	if err != nil {
-		return nil, err
-	}
-
-	limiter := client.NewRateLimiterManager(10, 10)
-	return &GenericValidator{
-		config:      cfg,
-		client:      httpClient,
-		limiter:     limiter,
-		bodyBytes:   []byte(cfg.Validation.Body),
-		checkCanary: true,
-	}, nil
-}
-
 func (v *GenericValidator) Name() string          { return v.config.Name }
 func (v *GenericValidator) KeyPatterns() []string { return v.config.KeyPatterns }
+
+// Config returns a copy of the provider configuration so callers (e.g. the
+// runner's retry budget) can read per-provider tuning fields without being
+// able to mutate the validator's internal state.
+func (v *GenericValidator) Config() ProviderConfig { return v.config }
 
 func (v *GenericValidator) SetSkipMetadata(skip bool) {
 	v.skipMetadata = skip
@@ -338,7 +327,7 @@ func (v *GenericValidator) Validate(ctx context.Context, apiKey string) (*models
 	}
 
 	cfg := v.config.Validation
-	endpoints := v.buildEndpointList(cfg)
+	endpoints := v.buildEndpointList(cfg, v.config.RegionalEndpoints)
 
 	var result *models.ValidationResult
 	var resultErr error
@@ -402,7 +391,8 @@ func (v *GenericValidator) Validate(ctx context.Context, apiKey string) (*models
 	}
 
 	if v.cache != nil && result != nil {
-		v.cache.Set(v.Name(), apiKey, result)
+		ttl := time.Duration(v.config.CacheTTLSeconds) * time.Second
+		v.cache.SetWithTTL(v.Name(), apiKey, result, ttl)
 	}
 
 	if result != nil {
@@ -429,20 +419,15 @@ func (v *GenericValidator) Validate(ctx context.Context, apiKey string) (*models
 type endpointInfo struct {
 	url     string
 	headers map[string]string
+	region  string // optional human-readable label (e.g. "us-east-1"); "" for primary
 }
 
-func (v *GenericValidator) buildEndpointList(cfg ValidationConfig) []endpointInfo {
+func (v *GenericValidator) buildEndpointList(cfg ValidationConfig, regional []EndpointConfig) []endpointInfo {
 	endpoints := []endpointInfo{}
 
 	if len(cfg.Endpoints) > 0 {
 		for _, ep := range cfg.Endpoints {
-			headers := make(map[string]string)
-			for k, val := range cfg.Headers {
-				headers[k] = val
-			}
-			for k, val := range ep.Headers {
-				headers[k] = val
-			}
+			headers := mergeHeaders(cfg.Headers, ep.Headers)
 			endpoints = append(endpoints, endpointInfo{
 				url:     ep.URL,
 				headers: headers,
@@ -457,6 +442,19 @@ func (v *GenericValidator) buildEndpointList(cfg ValidationConfig) []endpointInf
 		})
 	}
 
+	// Regional endpoints are appended last so they participate in the
+	// parallel race alongside the primary URL. The first 2xx wins.
+	for _, ep := range regional {
+		if ep.URL == "" {
+			continue
+		}
+		endpoints = append(endpoints, endpointInfo{
+			url:     ep.URL,
+			headers: mergeHeaders(cfg.Headers, ep.Headers),
+			region:  ep.Region,
+		})
+	}
+
 	if len(endpoints) == 0 {
 		endpoints = append(endpoints, endpointInfo{
 			url:     cfg.URL,
@@ -465,6 +463,20 @@ func (v *GenericValidator) buildEndpointList(cfg ValidationConfig) []endpointInf
 	}
 
 	return endpoints
+}
+
+func mergeHeaders(global, override map[string]string) map[string]string {
+	if len(global) == 0 && len(override) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(global)+len(override))
+	for k, v := range global {
+		out[k] = v
+	}
+	for k, v := range override {
+		out[k] = v
+	}
+	return out
 }
 
 func (v *GenericValidator) validateWithEndpoint(ctx context.Context, apiKey string, cfg ValidationConfig, ep endpointInfo) (*models.ValidationResult, error) {
@@ -511,13 +523,13 @@ func (v *GenericValidator) validateWithEndpoint(ctx context.Context, apiKey stri
 		return nil, err
 	}
 
-	v.applyAuth(req, cfg.Auth, apiKey)
+	v.applyAuth(req, cfg.Auth, apiKey, ep.url)
 
 	if isGraphQL || len(v.bodyBytes) > 0 {
 		req.Header.Set("Content-Type", "application/json")
 	}
 	for k, val := range ep.headers {
-		req.Header.Set(k, val)
+		req.Header.Set(k, substituteKeyVars(val, apiKey))
 	}
 	client.ApplyEvasionHeaders(req)
 
@@ -529,6 +541,12 @@ func (v *GenericValidator) validateWithEndpoint(ctx context.Context, apiKey stri
 		Provider:     v.Name(),
 		Endpoint:     url,
 		ResponseTime: duration,
+	}
+	if ep.region != "" {
+		if result.Extra == nil {
+			result.Extra = make(map[string]interface{})
+		}
+		result.Extra["region"] = ep.region
 	}
 
 	if err != nil {
@@ -567,8 +585,16 @@ func (v *GenericValidator) validateWithEndpoint(ctx context.Context, apiKey stri
 		result.ResponseBody = string(bodyBytes)
 	}
 
+	// expected_status lets a provider declare which statuses count as
+	// success (e.g. HIBP treats 404 as "valid key, unknown account").
+	// Empty means the historical default: exactly 200. All other branches
+	// (402/429/5xx note-states, 401/403 invalid) are unchanged.
+	isSuccess := resp.StatusCode == 200
+	if expected := v.config.Validation.ExpectedStatus; len(expected) > 0 {
+		isSuccess = v.statusInList(resp.StatusCode, expected)
+	}
 	switch {
-	case resp.StatusCode == 200:
+	case isSuccess:
 		if v.checkBodyError(bodyBytes, result) {
 			break
 		}
@@ -587,6 +613,9 @@ func (v *GenericValidator) validateWithEndpoint(ctx context.Context, apiKey stri
 		result.IsValid = true
 		if isGraphQL {
 			v.extractGraphQLMetadata(bodyBytes, result)
+		}
+		if LooksOpenAPI(bodyBytes) {
+			ExtractOpenAPIMetadata(bodyBytes, result)
 		}
 		v.extractValidationMetadata(bodyBytes, result)
 		if !v.skipMetadata {
@@ -621,16 +650,27 @@ func (v *GenericValidator) validateWithEndpoint(ctx context.Context, apiKey stri
 	return result, nil
 }
 
-func (v *GenericValidator) applyAuth(req *http.Request, auth string, apiKey string) {
+func (v *GenericValidator) applyAuth(req *http.Request, auth string, apiKey string, endpointURL string) {
 	if auth == "" || auth == "none" {
 		return
 	}
+	// Composite host:credential keys (e.g. "myhost:coolify_xxx") carry the
+	// host in {{key.client_id}}, which the endpoint URL consumes. When that
+	// happens, header/query auth must carry only the secret part — sending
+	// "host:secret" verbatim as a Bearer token always 401s. basic_composite
+	// is exempt: it splits user:password itself and never involves a host.
+	cred := apiKey
+	if auth != "basic_composite" && strings.Contains(endpointURL, "{{key.client_id}}") {
+		if parts := strings.SplitN(apiKey, ":", 2); len(parts) == 2 && parts[1] != "" {
+			cred = parts[1]
+		}
+	}
 	if auth == "bearer" {
-		req.Header.Set("Authorization", "Bearer "+apiKey)
+		req.Header.Set("Authorization", "Bearer "+cred)
 		return
 	}
 	if auth == "basic" {
-		req.SetBasicAuth(apiKey, "")
+		req.SetBasicAuth(cred, "")
 		return
 	}
 	if auth == "basic_composite" {
@@ -643,16 +683,42 @@ func (v *GenericValidator) applyAuth(req *http.Request, auth string, apiKey stri
 		return
 	}
 	if strings.HasPrefix(auth, "header:") {
-		headerName := strings.TrimPrefix(auth, "header:")
-		req.Header.Set(headerName, apiKey)
+		rest := strings.TrimPrefix(auth, "header:")
+		// header:<name>:<prefix> sends "<prefix><cred>", e.g.
+		// header:Authorization:token  →  "Authorization: token <key>"
+		// for services with non-Bearer schemes (Snyk, SentinelOne, ...).
+		// A trailing colon with empty prefix behaves like plain header:.
+		if name, prefix, ok := strings.Cut(rest, ":"); ok {
+			if name != "" {
+				req.Header.Set(name, prefix+cred)
+			}
+			return
+		}
+		req.Header.Set(rest, cred)
 		return
 	}
 	if strings.HasPrefix(auth, "query:") {
 		paramName := strings.TrimPrefix(auth, "query:")
 		q := req.URL.Query()
-		q.Set(paramName, apiKey)
+		q.Set(paramName, cred)
 		req.URL.RawQuery = q.Encode()
 	}
+}
+
+// substituteKeyVars expands {{key}}, {{key.client_id}} and {{key.secret}}
+// in header values and similar templates. Composite keys split on the first
+// colon; non-composite keys only expand {{key}}.
+func substituteKeyVars(s, apiKey string) string {
+	s = strings.ReplaceAll(s, "{{key}}", apiKey)
+	if !strings.Contains(apiKey, ":") {
+		return s
+	}
+	parts := strings.SplitN(apiKey, ":", 2)
+	s = strings.ReplaceAll(s, "{{key.client_id}}", parts[0])
+	if len(parts) == 2 {
+		s = strings.ReplaceAll(s, "{{key.secret}}", parts[1])
+	}
+	return s
 }
 
 func (v *GenericValidator) extractGraphQLMetadata(bodyBytes []byte, result *models.ValidationResult) {
@@ -860,9 +926,9 @@ func (v *GenericValidator) runMetadataBatch(ctx context.Context, batch []Metadat
 				return
 			}
 
-			v.applyAuth(req, s.Auth, variables["key"])
+			v.applyAuth(req, s.Auth, variables["key"], s.URL)
 			for k, val := range s.Headers {
-				req.Header.Set(k, val)
+				req.Header.Set(k, substituteKeyVars(val, variables["key"]))
 			}
 			client.ApplyEvasionHeaders(req)
 

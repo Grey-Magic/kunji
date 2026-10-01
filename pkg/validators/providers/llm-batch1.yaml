@@ -1,0 +1,60 @@
+- name: cerebras
+  category: llm
+  key_prefixes: ["csk-"]
+  key_patterns: ["^csk-[a-zA-Z0-9_-]{20,}$"]
+  validation:
+    method: GET
+    url: "https://api.cerebras.ai/v1/models"
+    auth: "bearer"
+  detection:
+    min_score: 200
+
+- name: chutes
+  category: llm
+  key_prefixes: ["cpk_"]
+  key_patterns: ["^cpk_[a-zA-Z0-9_-]{20,}$"]
+  validation:
+    method: GET
+    url: "https://api.chutes.ai/users/me/quotas"
+    auth: "bearer"
+  detection:
+    min_score: 200
+
+- name: friendli
+  category: llm
+  key_prefixes: ["flp_"]
+  key_patterns: ["^flp_[a-zA-Z0-9_-]{20,}$"]
+  validation:
+    method: POST
+    url: "https://api.friendli.ai/serverless/v1/chat/completions"
+    auth: "bearer"
+    headers:
+      content-type: "application/json"
+    body: '{"model":"zai-org/GLM-5.3","messages":[{"role":"user","content":"Hi"}],"max_tokens":1}'
+  detection:
+    min_score: 200
+
+- name: parasail
+  category: llm
+  key_prefixes: ["psk-"]
+  key_patterns: ["^psk-[A-Za-z0-9_-]{4,}-[A-Za-z0-9_-]{4,}$"]
+  validation:
+    method: GET
+    url: "https://api.parasail.io/v1/models"
+    auth: "bearer"
+  detection:
+    min_score: 200
+
+- name: tavily
+  category: search
+  key_prefixes: ["tvly-"]
+  key_patterns: ["^tvly-[a-zA-Z0-9_-]{20,}$"]
+  validation:
+    method: POST
+    url: "https://api.tavily.com/search"
+    auth: "bearer"
+    headers:
+      content-type: "application/json"
+    body: '{"query":"test","max_results":1,"include_answer":false}'
+  detection:
+    min_score: 200

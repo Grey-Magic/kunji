@@ -112,8 +112,15 @@ func (f *ValidatorFactory) GetValidator(name string) (Validator, bool) {
 	return v, true
 }
 
-func (f *ValidatorFactory) Cache() client.ResultCache {
-	return f.sharedCache
+// RegisterConfig adds (or replaces) a provider config in the factory. Used
+// by tests to inject stub providers without mutating the global cached
+// configs. Production code should rely on LoadProviderConfigs and the
+// --templates flag instead.
+func (f *ValidatorFactory) RegisterConfig(cfg ProviderConfig) {
+	f.mux.Lock()
+	defer f.mux.Unlock()
+	f.configs[cfg.Name] = cfg
+	delete(f.validators, cfg.Name)
 }
 
 func (f *ValidatorFactory) SharedClient() *http.Client {

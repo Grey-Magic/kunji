@@ -1,0 +1,31 @@
+# Build artifacts
+/kunji
+/*.zip
+/dist/
+
+# Local cache files (created by `kunji validate`)
+.kunji_neg_cache
+.kunji_pos_cache
+.kunji_history.jsonl
+.kunji_audit.jsonl
+.kunji/config.yaml
+.kunji/
+
+# Go test/coverage artifacts
+*.test
+*.out
+coverage.txt
+coverage.html
+
+# Editor / OS
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Local config overrides
+.env
+.env.*
+*.local

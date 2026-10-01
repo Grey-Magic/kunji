@@ -7,13 +7,21 @@ import (
 )
 
 type Detector struct {
-	index *DetectorIndex
+	index         *DetectorIndex
+	minScoreByKey map[string]int // provider name -> configured MinScore; 0/absent = no threshold
 }
 
 func NewDetectorFromConfigs(configs []ProviderConfig) *Detector {
-	return &Detector{
-		index: BuildDetectionIndex(configs),
+	d := &Detector{
+		index:         BuildDetectionIndex(configs),
+		minScoreByKey: make(map[string]int, len(configs)),
 	}
+	for _, c := range configs {
+		if c.Detection != nil && c.Detection.MinScore > 0 {
+			d.minScoreByKey[c.Name] = c.Detection.MinScore
+		}
+	}
+	return d
 }
 
 func NewDetector() *Detector {
@@ -27,11 +35,6 @@ func NewDetector() *Detector {
 
 func (d *Detector) DetectProvider(apiKey string, manualCategory string) string {
 	res := d.DetectProviderWithSuggestion(apiKey, manualCategory)
-	return res.Provider
-}
-
-func (d *Detector) DetectProviderBytes(apiKey []byte, manualCategory string) string {
-	res := d.DetectProviderWithSuggestion(string(apiKey), manualCategory)
 	return res.Provider
 }
 

@@ -179,11 +179,3 @@ func TestTruncateStr(t *testing.T) {
 		})
 	}
 }
-
-func makeString(n int) string {
-	s := ""
-	for i := 0; i < n; i++ {
-		s += "a"
-	}
-	return s
-}

@@ -311,7 +311,7 @@ func TestResolveFormatterParams_PrefersParamsOverTyped(t *testing.T) {
 		PushoverUserKey:     "user-typed",
 		PushoverAppToken:    "app-typed",
 		Params: map[string]string{
-			ParamChatID:  "from-param",
+			ParamChatID:   "from-param",
 			ParamPriority: "5",
 		},
 	})

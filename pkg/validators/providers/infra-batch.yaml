@@ -1,0 +1,10 @@
+- name: tailscale
+  category: infrastructure
+  key_prefixes: ["tskey-api-"]
+  key_patterns: ["^tskey-api-[A-Za-z0-9_-]{10,}$"]
+  validation:
+    method: GET
+    url: "https://api.tailscale.com/api/v2/tailnet/-/devices"
+    auth: "bearer"
+  detection:
+    min_score: 200
