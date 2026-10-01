@@ -31,33 +31,33 @@ import (
 )
 
 type Runner struct {
-	Threads        int
-	Proxy          string
-	Retries        int
-	Timeout        int
-	OutFile        string
-	ManualProvider string
-	ManualCategory string
-	Resume         bool
-	MinKeyLength   int
-	OnlyValid      bool
-	MinBalance     float64
-	DeepScan       bool
-	NoCache        bool
-	SkipMetadata   bool
-	CanaryCheck    bool
-	Password       string
-	Bench          bool
-	Quiet          bool
-	Format         string
-	Factory        *validators.ValidatorFactory
-	Detector       *validators.Detector
-	ProxyRotator   *client.ProxyRotator
-	negativeCache  *utils.BloomFilter
-	negCachePath   string
-	metadataJobs   chan *models.ValidationResult
-	metadataWg     sync.WaitGroup
-	Sinks          []sink.Sink
+	Threads          int
+	Proxy            string
+	Retries          int
+	Timeout          int
+	OutFile          string
+	ManualProvider   string
+	ManualCategory   string
+	Resume           bool
+	MinKeyLength     int
+	OnlyValid        bool
+	MinBalance       float64
+	DeepScan         bool
+	NoCache          bool
+	SkipMetadata     bool
+	CanaryCheck      bool
+	Password         string
+	Bench            bool
+	Quiet            bool
+	Format           string
+	Factory          *validators.ValidatorFactory
+	Detector         *validators.Detector
+	ProxyRotator     *client.ProxyRotator
+	negativeCache    *utils.BloomFilter
+	negCachePath     string
+	metadataJobs     chan *models.ValidationResult
+	metadataWg       sync.WaitGroup
+	Sinks            []sink.Sink
 
 	// FilterExprs is the parsed --filter argument. Empty means "no filter".
 	FilterExprs []FilterExpr
@@ -191,17 +191,10 @@ func (r *Runner) PreflightProxyCheck() {
 	spinner, _ := pterm.DefaultSpinner.Start("Checking proxy health...")
 	deadCount := r.ProxyRotator.FilterDeadProxies(r.Timeout)
 
-	msg := "All proxies are healthy."
-	if fastest, egress, latency, ok := r.ProxyRotator.Fastest(); ok {
-		msg = fmt.Sprintf("Fastest %s (%s)", fastest, latency.Round(time.Millisecond))
-		if egress != "" {
-			msg += fmt.Sprintf(" egress %s", egress)
-		}
-	}
 	if deadCount > 0 {
-		spinner.Warning(fmt.Sprintf("Discarded %d dead proxies. %s", deadCount, msg))
+		spinner.Warning(fmt.Sprintf("Discarded %d dead proxies. Continuing with remaining proxies.", deadCount))
 	} else {
-		spinner.Success(msg)
+		spinner.Success("All proxies are healthy.")
 	}
 }
 

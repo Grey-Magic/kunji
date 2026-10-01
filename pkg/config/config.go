@@ -20,6 +20,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -245,4 +246,21 @@ func walk(cmd *cobra.Command, fn func(*cobra.Command)) {
 	for _, c := range cmd.Commands() {
 		walk(c, fn)
 	}
+}
+
+// Cached is a process-wide convenience wrapper for the common case. It loads
+// the config once and re-uses it on subsequent calls. The first call returns
+// (cfg, err) where err is non-nil only for parse errors; a missing file is
+// not an error.
+var (
+	cachedOnce sync.Once
+	cachedCfg  *Config
+	cachedErr  error
+)
+
+func Cached() (*Config, error) {
+	cachedOnce.Do(func() {
+		cachedCfg, cachedErr = Load()
+	})
+	return cachedCfg, cachedErr
 }

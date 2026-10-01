@@ -30,6 +30,16 @@ type Threshold struct {
 	RawInput string
 }
 
+func (t Threshold) String() string {
+	unit := ""
+	if t.Percent {
+		unit = "%"
+	}
+	return fmt.Sprintf("%s%s%s%g%s", t.Metric, sep(t.Op), t.Op, t.Value, unit)
+}
+
+func sep(op string) string { return " " }
+
 // ParseThreshold parses one --fail-if argument of the form:
 //
 //	metric op value[%]    e.g. invalid > 5%,  valid >= 10, error < 1%

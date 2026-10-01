@@ -229,25 +229,33 @@ func checkProxy(proxyInput string) doctorCheck {
 		}
 	}
 
-	// Score every proxy (latency + egress IP via ipify) and drop the dead.
-	dead := rotator.FilterDeadProxies(5)
-	alive := count - dead
-	if alive <= 0 {
+	// Try to reach the probe target through one of the proxies.
+	pxy, _ := rotator.GetProxy(nil)
+	if pxy == nil {
+		return doctorCheck{
+			Name:    "Proxy health",
+			Status:  doctorWarn,
+			Message: fmt.Sprintf("%d proxy/ies parsed, but rotator returned no proxy", count),
+		}
+	}
+
+	tr := &http.Transport{
+		Proxy: http.ProxyURL(pxy),
+	}
+	c := &http.Client{Transport: tr, Timeout: 5 * time.Second}
+	resp, err := c.Get("https://api.ipify.org?format=json")
+	if err != nil {
 		return doctorCheck{
 			Name:    "Proxy health",
 			Status:  doctorFail,
-			Message: fmt.Sprintf("all %d proxie(s) unreachable", count),
+			Message: fmt.Sprintf("proxy %s unreachable: %v", pxy.String(), err),
 		}
 	}
-	fastest, egress, latency, _ := rotator.Fastest()
-	msg := fmt.Sprintf("%d/%d alive, fastest %s (%s)", alive, count, fastest, latency.Round(time.Millisecond))
-	if egress != "" {
-		msg += fmt.Sprintf(", egress %s", egress)
-	}
+	resp.Body.Close()
 	return doctorCheck{
 		Name:    "Proxy health",
 		Status:  doctorPass,
-		Message: msg,
+		Message: fmt.Sprintf("%s responded", pxy.String()),
 	}
 }
 

@@ -38,23 +38,12 @@ func (i LintIssue) String() string {
 
 // validAuthSchemes enumerates the auth modes GenericValidator.applyAuth
 // understands. Anything else will silently produce an unauthenticated request.
-// "body" means no header auth: the credential travels in the URL/body via a
-// {{key}} template (uptimerobot, mandrill-style entries).
 var validAuthSchemes = map[string]bool{
 	"":                true,
 	"none":            true,
 	"bearer":          true,
 	"basic":           true,
 	"basic_composite": true,
-	"body":            true,
-}
-
-// hasKeyTemplate reports whether s carries the credential in a URL, body, or
-// header template ({{key}}, {{key.client_id}}, {{key.secret}}).
-func hasKeyTemplate(s string) bool {
-	return strings.Contains(s, "{{key}}") ||
-		strings.Contains(s, "{{key.client_id}}") ||
-		strings.Contains(s, "{{key.secret}}")
 }
 
 // LintAll validates every provider in the given configs and returns the
@@ -178,31 +167,9 @@ func LintProvider(cfg ProviderConfig) []LintIssue {
 			Provider: cfg.Name,
 			Field:    "validation.auth",
 			Message: fmt.Sprintf(
-				"unknown auth scheme %q (allowed: none, bearer, basic, basic_composite, body, header:<name>[:<prefix>], query:<name>)",
+				"unknown auth scheme %q (allowed: none, bearer, basic, basic_composite, header:<name>, query:<name>)",
 				cfg.Validation.Auth),
 		})
-	} else if cfg.Validation.Auth == "body" && !hasKeyTemplate(cfg.Validation.Body) &&
-		!hasKeyTemplate(cfg.Validation.URL) {
-		issues = append(issues, LintIssue{
-			Severity: SeverityError,
-			Provider: cfg.Name,
-			Field:    "validation.body",
-			Message:  "auth is body but neither body nor url carries a {{key}} template; the request would go out unauthenticated",
-		})
-	} else if strings.HasPrefix(cfg.Validation.Auth, "header:") {
-		rest := strings.TrimPrefix(cfg.Validation.Auth, "header:")
-		name := rest
-		if i := strings.Index(rest, ":"); i >= 0 {
-			name = rest[:i]
-		}
-		if name == "" {
-			issues = append(issues, LintIssue{
-				Severity: SeverityError,
-				Provider: cfg.Name,
-				Field:    "validation.auth",
-				Message:  "header: auth has an empty header name",
-			})
-		}
 	}
 
 	if cfg.SyntaxCheck != "" && cfg.SyntaxCheck != "base64" {
@@ -327,25 +294,7 @@ func LintProvider(cfg ProviderConfig) []LintIssue {
 
 // lintURL flags http(s) scheme mismatches and missing hosts.
 func lintURL(provider, field, raw string) []LintIssue {
-	// Template placeholders ({{key}}, {{key.client_id}}, {{key.secret}},
-	// {{header.*}}) are resolved per-key at runtime; stand in a dummy host
-	// and path-safe token so structural checks apply to the static parts.
-	scrubbed := raw
-	for _, ph := range []string{"{{key.client_id}}", "{{key.secret}}", "{{key}}"} {
-		scrubbed = strings.ReplaceAll(scrubbed, ph, "placeholder")
-	}
-	for {
-		start := strings.Index(scrubbed, "{{header.")
-		if start < 0 {
-			break
-		}
-		end := strings.Index(scrubbed[start:], "}}")
-		if end < 0 {
-			break
-		}
-		scrubbed = scrubbed[:start] + "placeholder" + scrubbed[start+end+2:]
-	}
-	u, err := url.Parse(scrubbed)
+	u, err := url.Parse(raw)
 	if err != nil {
 		return []LintIssue{{
 			Severity: SeverityError,

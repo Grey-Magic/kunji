@@ -123,6 +123,10 @@ func (f *ValidatorFactory) RegisterConfig(cfg ProviderConfig) {
 	delete(f.validators, cfg.Name)
 }
 
+func (f *ValidatorFactory) Cache() client.ResultCache {
+	return f.sharedCache
+}
+
 func (f *ValidatorFactory) SharedClient() *http.Client {
 	return f.sharedClient
 }

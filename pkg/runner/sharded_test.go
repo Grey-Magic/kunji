@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -234,4 +235,9 @@ func TestRunSharded_DoesNotLeakGoroutines(t *testing.T) {
 	}
 	<-done
 	// No assertion needed; the test fails if runSharded deadlocks.
+}
+
+// helper used in some debugging — kept here so future tests can adopt it.
+func Example_shardedUsage() {
+	fmt.Println("kunji validate -f keys.txt --sharded")
 }

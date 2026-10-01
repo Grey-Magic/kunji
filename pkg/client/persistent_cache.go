@@ -192,6 +192,9 @@ var compressionEnabled = false
 // Existing plain lines remain valid; load handles both formats transparently.
 func SetCompressionEnabled(on bool) { compressionEnabled = on }
 
+// CompressionEnabled reports the current default.
+func CompressionEnabled() bool { return compressionEnabled }
+
 // Get returns a cached result if present and still fresh.
 func (c *PersistentCache) Get(provider, apiKey string) (*models.ValidationResult, bool) {
 	if c.disabled {
